@@ -1,0 +1,9 @@
+.env
+node_modules/
+# Local editor and OS files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local development artifacts
+*.log
