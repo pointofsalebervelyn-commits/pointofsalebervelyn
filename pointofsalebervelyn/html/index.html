@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.5, user-scalable=yes" />
+    <title>KoraPoint — Multi-business Point of Sale</title>
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="description" content="KoraPoint point-of-sale workspace for growing businesses" />
+    <link rel="manifest" href="../json/manifest.webmanifest" />
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- External libraries -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- Your custom styles -->
+    <link rel="stylesheet" href="../css/style.css" />
+    <script src="../javascript/config.js"></script>
+</head>
+<body>
+    <!-- React will mount here -->
+    <div id="root"></div>
+
+    <!-- Your main application JavaScript -->
+    <script src="../javascript/app.js?v=4"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('../javascript/sw.js'));
+        }
+    </script>
+</body>
+</html>
