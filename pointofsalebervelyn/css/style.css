@@ -70,7 +70,7 @@ body {
 .login-layout .login-card {
     width: 100%;
     min-height: 100%;
-    padding: clamp(36px, 5vw, 64px) clamp(28px, 5vw, 68px);
+    padding: clamp(42px, 5vw, 72px) clamp(34px, 5vw, 76px);
     border: 0;
     border-radius: 0;
     background: #f5f0dd;
@@ -82,6 +82,30 @@ body {
 }
 .login-layout .login-card::before { display: none; }
 .login-layout .login-card > .space-y-3 { width: 100%; }
+.login-layout .login-card h2 {
+    font-size: clamp(1.8rem, 2.8vw, 2.35rem);
+    line-height: 1.15;
+}
+.login-layout .login-card > p {
+    font-size: 1rem;
+    line-height: 1.5;
+}
+.login-layout .login-card input,
+.login-layout .login-card select {
+    min-height: 54px;
+    padding: 14px 16px;
+    font-size: 1rem;
+    border-radius: 12px;
+}
+.login-layout .login-card input.pr-20 {
+    padding-right: 76px;
+}
+.login-layout .login-card .btn-primary {
+    min-height: 54px;
+    padding: 14px 22px;
+    font-size: 1rem;
+    border-radius: 12px;
+}
 .login-visual {
     min-height: 100%;
     padding: clamp(30px, 5vw, 58px);
@@ -136,7 +160,7 @@ body {
     .hardware-paint::before { width: 56px; height: 12px; top: -9px; }
     .hardware-tools { width: 80px; height: 32px; }
     .hardware-bag { width: 58px; height: 52px; }
-    .login-layout .login-card { min-height: 470px; padding: 38px 26px; }
+    .login-layout .login-card { min-height: 470px; padding: 42px 26px; }
 }
 .login-card::before {
     content: '';
