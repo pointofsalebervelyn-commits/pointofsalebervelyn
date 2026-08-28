@@ -2159,6 +2159,9 @@ const [showSignup, setShowSignup] = useState(false);
 const [isSubmitting, setIsSubmitting] = useState(false);
 const [authMessage, setAuthMessage] = useState('');
 const [showAuthPassword, setShowAuthPassword] = useState(false);
+const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+const [passwordMessage, setPasswordMessage] = useState('');
+const [isChangingPassword, setIsChangingPassword] = useState(false);
 const [isLogin, setIsLogin] = useState(!currentUser || !hasSession);
 const backupInputRef = useRef(null);
 const isValidEmail = email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -2222,6 +2225,23 @@ setIsSubmitting(false);
 }
 };
 
+const handleChangePassword = async () => {
+if (isChangingPassword) return;
+if (passwordForm.newPassword.length < 12) { setPasswordMessage('New password must be at least 12 characters.'); return; }
+if (passwordForm.newPassword !== passwordForm.confirmPassword) { setPasswordMessage('New passwords do not match.'); return; }
+try {
+setIsChangingPassword(true);
+setPasswordMessage('Updating your password...');
+await apiRequest('/api/auth/password', { method: 'PATCH', body: JSON.stringify(passwordForm) }, DB.get(SESSION_KEY, null)?.accessToken);
+setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+setPasswordMessage('Password updated successfully.');
+showToast('Password updated');
+} catch (error) {
+setPasswordMessage(error.message);
+showToast(error.message, 'error');
+} finally { setIsChangingPassword(false); }
+};
+
 const handleAddUser = () => {
 if (!['owner', 'manager'].includes(currentUser?.role)) { showToast('Only the owner or a manager can manage staff', 'error'); return; }
 if (!form.name.trim() || !form.email.trim() || !form.password.trim()) { showToast('Name, email, and password required', 'error'); return; }
@@ -2267,9 +2287,11 @@ event.target.value = '';
 const startTour = () => window.dispatchEvent(new Event('nexatill:start-tour'));
 
 if (isLogin || !currentUser || !hasSession) {
-return React.createElement('div', { className: 'max-w-sm mx-auto mt-12 p-6 bg-white rounded-2xl shadow-lg border border-gray-100' },
-React.createElement('h2', { className: 'text-2xl font-bold text-center text-gray-800 mb-2' }, '🔐 KoraPoint'),
-React.createElement('p', { className: 'text-center text-gray-400 text-sm mb-6' }, showSignup ? 'Create your approved business workspace' : 'Sign in to your approved company workspace'),
+return React.createElement('div', { className: 'login-screen' },
+React.createElement('div', { className: 'login-layout' },
+React.createElement('div', { className: 'login-card' },
+React.createElement('h2', { className: 'text-2xl font-bold text-center text-gray-800 mb-2' }, 'Bopstina Ventures'),
+React.createElement('p', { className: 'text-center text-gray-400 text-sm mb-6' }, 'Sign in to your business workspace'),
 authMessage && React.createElement('p', { role: 'alert', className: `text-center text-sm mb-3 ${authMessage.includes('...') ? 'text-amber-600' : 'text-rose-600'}` }, authMessage),
 React.createElement('div', { className: 'space-y-3' },
 showSignup && React.createElement(React.Fragment, null,
@@ -2321,15 +2343,27 @@ ariaLabel: showAuthPassword ? 'Hide password' : 'Show password'
 }, showAuthPassword ? 'Hide' : 'Show')
 ),
 React.createElement('button', {
-onClick: showSignup ? handleSignup : handleLogin,
+onClick: handleLogin,
 disabled: isSubmitting,
 className: 'w-full btn-primary'
-}, isSubmitting ? 'Connecting...' : (showSignup ? 'Create Company Account' : 'Sign In')),
-React.createElement('p', { className: 'text-xs text-gray-400 text-center mt-2' },
-React.createElement('div', { className: 'flex flex-col gap-2 text-center' },
-React.createElement('button', { onClick: () => setShowSignup(!showSignup), className: 'text-amber-600 hover:text-amber-700 font-medium' }, showSignup ? 'Already have an account? Sign in' : 'Approved by the user? Create your business account'),
-!showSignup && React.createElement('a', { href: 'https://wa.me/233509444509?text=Hello%20KoraPoint%2C%20I%20would%20like%20approval%20to%20use%20the%20POS.', target: '_blank', rel: 'noreferrer', className: 'text-xs text-gray-400 hover:text-amber-600' }, 'Need approval? WhatsApp 050 944 4509')
+}, isSubmitting ? 'Connecting...' : 'Sign In')
 )
+),
+React.createElement('div', { className: 'login-visual' },
+React.createElement('div', { className: 'login-visual-copy' },
+React.createElement('span', { className: 'login-visual-kicker' }, 'Bopstina Ventures'),
+React.createElement('h3', null, 'Everything your shop needs, in one place.'),
+React.createElement('p', null, 'Track stock, serve customers, and keep every sale moving.'),
+React.createElement('div', { className: 'hardware-scene', 'aria-hidden': 'true' },
+React.createElement('div', { className: 'hardware-shelf' }),
+React.createElement('div', { className: 'hardware-item hardware-box' }, 'NUTS'),
+React.createElement('div', { className: 'hardware-item hardware-paint' }, 'PAINT'),
+React.createElement('div', { className: 'hardware-item hardware-tools' }, 'TOOLS'),
+React.createElement('div', { className: 'hardware-item hardware-bag' }, 'BOPSTINA'),
+React.createElement('div', { className: 'hardware-tag' }, 'INVENTORY', React.createElement('strong', null, 'IN SYNC'))
+)
+),
+React.createElement('div', { className: 'login-visual-footer' }, 'A calmer way to run the counter', React.createElement('span', null, '● LIVE'))
 )
 )
 );
@@ -2364,6 +2398,17 @@ React.createElement('button', { onClick: downloadBackup, className: 'btn-seconda
 React.createElement('button', { onClick: () => backupInputRef.current?.click(), className: 'btn-secondary text-sm' }, '⬆ Restore Backup'),
 React.createElement('input', { ref: backupInputRef, type: 'file', accept: '.json,application/json', onChange: handleRestore, className: 'hidden' })
 )
+),
+currentUser && hasSession && React.createElement('div', { className: 'stat-card p-4' },
+React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-1' }, '🔑 Change Password'),
+React.createElement('p', { className: 'text-xs text-gray-400 mb-3' }, 'Use a new password with at least 12 characters.'),
+React.createElement('div', { className: 'grid gap-3 sm:grid-cols-3' },
+React.createElement('input', { type: 'password', placeholder: 'Current password', value: passwordForm.currentPassword, onChange: e => setPasswordForm(prev => ({ ...prev, currentPassword: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
+React.createElement('input', { type: 'password', placeholder: 'New password', value: passwordForm.newPassword, onChange: e => setPasswordForm(prev => ({ ...prev, newPassword: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
+React.createElement('input', { type: 'password', placeholder: 'Confirm new password', value: passwordForm.confirmPassword, onChange: e => setPasswordForm(prev => ({ ...prev, confirmPassword: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' })
+),
+passwordMessage && React.createElement('p', { className: `text-xs mt-2 ${passwordMessage.includes('successfully') ? 'text-emerald-600' : 'text-rose-600'}` }, passwordMessage),
+React.createElement('button', { onClick: handleChangePassword, disabled: isChangingPassword, className: 'btn-primary text-sm mt-3' }, isChangingPassword ? 'Updating...' : 'Update Password')
 ),
 React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' }, '🛡️ Activity Log'),
@@ -2488,55 +2533,6 @@ function Tour({ step, onNext, onBack, onClose, onNavigate }) {
     );
 }
 
-function LandingPage() {
-    const [showLogin, setShowLogin] = useState(false);
-    if (showLogin) return React.createElement(SettingsPage);
-    const contactHref = 'https://wa.me/233509444509?text=Hello%20KoraPoint%2C%20I%20would%20like%20access%20to%20the%20POS.';
-    const whatsappHref = 'https://wa.me/233509444509?text=Hello%20KoraPoint%2C%20I%20would%20like%20access%20to%20the%20POS.';
-    return React.createElement('div', { className: 'min-h-screen bg-slate-950 text-white' },
-        React.createElement('header', { className: 'max-w-6xl mx-auto px-5 py-5 flex items-center justify-between' },
-            React.createElement('div', { className: 'text-xl font-bold' }, '🏪 KoraPoint'),
-            React.createElement('button', { onClick: () => setShowLogin(true), className: 'text-sm text-amber-300 hover:text-amber-200' }, 'Sign in')
-        ),
-        React.createElement('main', { className: 'max-w-6xl mx-auto px-5 pb-16' },
-            React.createElement('section', { className: 'grid lg:grid-cols-2 gap-10 items-center pt-12 lg:pt-20' },
-                React.createElement('div', null,
-                    React.createElement('p', { className: 'text-amber-300 text-sm font-semibold uppercase tracking-widest mb-4' }, 'Point of sale for growing shops'),
-                    React.createElement('h1', { className: 'text-4xl sm:text-6xl font-black leading-tight' }, 'Run the counter. Know the business.'),
-                    React.createElement('p', { className: 'mt-5 text-slate-300 text-lg max-w-xl' }, 'KoraPoint keeps products, stock, sales, staff, and daily performance together so shop owners can serve customers quickly and make better decisions.'),
-                    React.createElement('div', { className: 'flex flex-wrap gap-3 mt-8' },
-                        React.createElement('a', { href: contactHref, target: '_blank', rel: 'noreferrer', className: 'btn-primary inline-block' }, 'Contact on WhatsApp'),
-                        React.createElement('button', { onClick: () => setShowLogin(true), className: 'px-5 py-2.5 rounded-lg border border-slate-600 text-white hover:bg-slate-800' }, 'Sign in to POS')
-                    )
-                ),
-            React.createElement('div', { className: 'bg-white rounded-2xl p-4 shadow-2xl rotate-1 landing-preview' },
-                    React.createElement('div', { className: 'bg-slate-100 rounded-xl p-4 text-slate-800' },
-                        React.createElement('div', { className: 'flex justify-between mb-4' }, React.createElement('strong', null, 'Today at a glance'), React.createElement('span', { className: 'text-emerald-600 text-sm' }, '● Live')),
-                        React.createElement('div', { className: 'grid grid-cols-3 gap-2 mb-4' }, ['Sales GH₵ 2,480', 'Orders 38', 'Profit 620'].map(item => React.createElement('div', { key: item, className: 'bg-white rounded-lg p-3 text-xs font-semibold' }, item))),
-                        React.createElement('div', { className: 'bg-white rounded-lg p-4' }, React.createElement('p', { className: 'text-xs text-slate-400 mb-3' }, 'Recent sales'), ['Cement  GH₵180', 'Paint  GH₵95', 'Nails  GH₵60'].map(item => React.createElement('div', { key: item, className: 'flex justify-between py-2 border-b border-slate-100 text-sm' }, React.createElement('span', null, item.split('  ')[0]), React.createElement('b', null, item.split('  ')[1]))))
-                    )
-                )
-            ),
-            React.createElement('section', { className: 'grid md:grid-cols-3 gap-4 mt-20' },
-                [['📦', 'Inventory control', 'Know what is in stock and what needs attention.'], ['🛒', 'Faster checkout', 'Keep multiple customer carts pending while you serve the next person.'], ['📈', 'Daily visibility', 'Review sales, profit, expenses, and activity from one workspace.']].map(item => React.createElement('div', { key: item[1], className: 'border border-slate-800 rounded-xl p-5' }, React.createElement('div', { className: 'text-2xl mb-3' }, item[0]), React.createElement('h2', { className: 'font-bold mb-2' }, item[1]), React.createElement('p', { className: 'text-slate-400 text-sm' }, item[2])))
-            ),
-            React.createElement('section', { className: 'mt-16 border-t border-slate-800 pt-10' },
-                React.createElement('div', { className: 'flex flex-wrap items-center justify-between gap-5' },
-                    React.createElement('div', null,
-                        React.createElement('p', { className: 'text-amber-300 text-sm font-semibold uppercase tracking-widest mb-2' }, 'Ready when you are'),
-                        React.createElement('h2', { className: 'text-2xl font-bold' }, 'Start your own business workspace'),
-                        React.createElement('p', { className: 'text-slate-400 mt-2 max-w-xl' }, 'Contact the KoraPoint user for approval. Once your account is created, you become the owner of your business workspace and can add managers and cashiers from Settings.')
-                    ),
-                    React.createElement('div', { className: 'flex flex-wrap gap-3' },
-                        React.createElement('a', { href: contactHref, target: '_blank', rel: 'noreferrer', className: 'btn-primary inline-block' }, 'WhatsApp 050 944 4509'),
-                        React.createElement('a', { href: whatsappHref, target: '_blank', rel: 'noreferrer', className: 'px-5 py-2.5 rounded-lg border border-emerald-500 text-emerald-300 hover:bg-emerald-950' }, 'WhatsApp us')
-                    )
-                )
-            )
-        )
-    );
-}
-
 // ---- Main App ----
 function App() {
 const { currentUser, currentCompany } = useApp();
@@ -2553,7 +2549,7 @@ useEffect(() => {
     return () => window.removeEventListener('nexatill:start-tour', openTour);
 }, []);
 
-if (!currentUser || !hasSession) return React.createElement(LandingPage);
+if (!currentUser || !hasSession) return React.createElement(SettingsPage);
 
 const closeTour = () => {
     DB.set('tourComplete', true);

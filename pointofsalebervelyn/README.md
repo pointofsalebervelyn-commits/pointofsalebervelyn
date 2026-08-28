@@ -41,9 +41,9 @@ Vercel hosts both the frontend and the Node.js API. The API entry point is `api/
 
 1. Push this repository to GitHub.
 2. Import the repository into Vercel and keep the project root at the repository root.
-3. Add these Vercel environment variables for the Production environment: `DATABASE_URL`, `JWT_SECRET` (at least 32 characters), and `BUSINESS_APPROVAL_CODE`.
+3. In Supabase, create a project and copy its Node/Postgres connection string from **Project Settings > Database > Connect**. Prefer the pooler connection string for serverless workloads. Add it to Vercel as `DATABASE_URL`, along with `JWT_SECRET` (at least 32 characters) and `BUSINESS_APPROVAL_CODE` for the Production environment.
 4. Optionally add `RESEND_API_KEY` and `REPORT_FROM_EMAIL` for emailed reports.
-5. Apply `sql/schema.sql` once to the hosted PostgreSQL database, using its SQL console or `npm run db:setup` with `DATABASE_URL` set locally.
+5. Open the Supabase **SQL Editor**, paste and run `sql/schema.sql` once. Do not expose the Supabase service-role key in frontend code; this app connects through the server-side `DATABASE_URL` only.
 6. Deploy. The frontend uses the deployed Vercel URL as its API URL automatically; local development continues to use `http://localhost:3000`.
 
 Never commit `.env`, database passwords, or JWT secrets.
