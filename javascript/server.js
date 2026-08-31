@@ -390,6 +390,54 @@ app.get('/api/register', requireAuth, async (req, res, next) => { try { const re
 app.post('/api/register/open', requireAuth, async (req, res, next) => { try { const result = await pool.query(`INSERT INTO registers (tenant_id,is_open,opening_cash,opened_at) VALUES ($1,true,$2,now()) ON CONFLICT (tenant_id) DO UPDATE SET is_open=true,opening_cash=EXCLUDED.opening_cash,opened_at=EXCLUDED.opened_at,closing_cash=NULL,closed_at=NULL RETURNING is_open AS "isOpen",opening_cash AS "openingCash",opened_at AS "openedAt"`, [req.user.tenant_id, Number(req.body.openingCash) || 0]); await addAudit(pool, req.user.tenant_id, req.user.id, 'Register opened'); res.json({ register: result.rows[0] }); } catch (error) { next(error); } });
 app.post('/api/register/close', requireAuth, async (req, res, next) => { try { const result = await pool.query(`UPDATE registers SET is_open=false,closing_cash=$1,closed_at=now() WHERE tenant_id=$2 RETURNING is_open AS "isOpen",opening_cash AS "openingCash",opened_at AS "openedAt",closing_cash AS "closingCash",closed_at AS "closedAt"`, [Number(req.body.closingCash) || 0, req.user.tenant_id]); await addAudit(pool, req.user.tenant_id, req.user.id, 'Register closed'); res.json({ register: result.rows[0] }); } catch (error) { next(error); } });
 
+app.get('/api/held-sales', requireAuth, async (req, res, next) => {
+    try {
+        const result = await pool.query(`SELECT id, tenant_id AS "tenantId", cashier_id AS "cashierId", customer_name AS "customerName", customer_phone AS "customerPhone", items, subtotal, discount, total, status, notes, created_at AS "createdAt", updated_at AS "updatedAt", held_at AS "heldAt", resumed_at AS "resumedAt" FROM held_sales WHERE tenant_id = $1 ORDER BY updated_at DESC`, [req.user.tenant_id]);
+        res.json({ heldSales: result.rows });
+    } catch (error) { next(error); }
+});
+
+app.post('/api/held-sales', requireAuth, async (req, res, next) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const customerName = typeof req.body?.customerName === 'string' && req.body.customerName.trim() ? req.body.customerName.trim() : 'Walk-in Customer';
+    const customerPhone = typeof req.body?.customerPhone === 'string' ? req.body.customerPhone.trim() : '';
+    const subtotal = Number(req.body?.subtotal) || 0;
+    const discount = Number(req.body?.discount) || 0;
+    const total = Number(req.body?.total) || Math.max(0, subtotal - discount);
+    try {
+        const result = await pool.query(`INSERT INTO held_sales (tenant_id, cashier_id, customer_name, customer_phone, items, subtotal, discount, total, status, notes, held_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'held', $9, now(), now()) RETURNING id, tenant_id AS "tenantId", cashier_id AS "cashierId", customer_name AS "customerName", customer_phone AS "customerPhone", items, subtotal, discount, total, status, notes, created_at AS "createdAt", updated_at AS "updatedAt", held_at AS "heldAt"`, [req.user.tenant_id, req.user.id, customerName, customerPhone, JSON.stringify(items), subtotal, discount, total, String(req.body?.notes || '').trim()]);
+        await addAudit(pool, req.user.tenant_id, req.user.id, 'Held sale created', result.rows[0].id);
+        res.status(201).json({ heldSale: result.rows[0] });
+    } catch (error) { next(error); }
+});
+
+app.patch('/api/held-sales/:id', requireAuth, async (req, res, next) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : null;
+    const subtotal = req.body?.subtotal != null ? Number(req.body.subtotal) || 0 : null;
+    const discount = req.body?.discount != null ? Number(req.body.discount) || 0 : null;
+    const total = req.body?.total != null ? Number(req.body.total) || 0 : null;
+    const status = typeof req.body?.status === 'string' ? req.body.status : null;
+    try {
+        const result = await pool.query(
+            `UPDATE held_sales SET items = COALESCE($1::jsonb, items), subtotal = COALESCE($2, subtotal), discount = COALESCE($3, discount), total = COALESCE($4, total), status = COALESCE($5, status), updated_at = now(), resumed_at = CASE WHEN $5 = 'held' THEN now() ELSE resumed_at END WHERE id = $6 AND tenant_id = $7 RETURNING id, tenant_id AS "tenantId", cashier_id AS "cashierId", customer_name AS "customerName", customer_phone AS "customerPhone", items, subtotal, discount, total, status, notes, created_at AS "createdAt", updated_at AS "updatedAt", held_at AS "heldAt", resumed_at AS "resumedAt"`,
+            [items ? JSON.stringify(items) : null, subtotal, discount, total, status, req.params.id, req.user.tenant_id]
+        );
+        if (!result.rowCount) return res.status(404).json({ error: 'Held sale not found' });
+        await addAudit(pool, req.user.tenant_id, req.user.id, 'Held sale updated', result.rows[0].id);
+        res.json({ heldSale: result.rows[0] });
+    } catch (error) { next(error); }
+});
+
+app.delete('/api/held-sales/:id', requireAuth, async (req, res, next) => {
+    try {
+        const result = await pool.query('UPDATE held_sales SET status = $1, updated_at = now() WHERE id = $2 AND tenant_id = $3 RETURNING id', ['cancelled', req.params.id, req.user.tenant_id]);
+        if (!result.rowCount) return res.status(404).json({ error: 'Held sale not found' });
+        await addAudit(pool, req.user.tenant_id, req.user.id, 'Held sale cancelled', req.params.id);
+        res.json({ ok: true });
+    } catch (error) { next(error); }
+});
+
 app.get('/api/products', requireAuth, async (req, res, next) => {
     try {
         const result = await pool.query(

@@ -15,6 +15,104 @@ const DB = {
 
 const API_BASE = window.NEXATILL_API_URL || 'http://localhost:3000';
 const SESSION_KEY = 'nexatill_session';
+const LOCAL_USERS_KEY = 'nexatill_local_users';
+const LOCAL_APPROVAL_CODE = 'BERVELYN@123';
+
+async function hashValue(value) {
+    const bytes = new TextEncoder().encode(String(value));
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(hash)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function getLocalUsers() {
+    try {
+        const raw = localStorage.getItem(LOCAL_USERS_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveLocalUsers(users) {
+    localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+}
+
+async function attemptLocalAuth(path, credentials) {
+    const users = getLocalUsers();
+    if (path === '/api/auth/signup') {
+        const accessCode = String(credentials?.accessCode || '').trim();
+        const companyName = String(credentials?.companyName || '').trim();
+        const businessType = String(credentials?.businessType || '').trim();
+        const name = String(credentials?.name || '').trim();
+        const email = String(credentials?.email || '').trim().toLowerCase();
+        const password = String(credentials?.password || '');
+
+        if (!accessCode || accessCode !== LOCAL_APPROVAL_CODE) {
+            throw new Error('A valid approval code is required.');
+        }
+        if (!companyName || !businessType || !name || !email || password.length < 12) {
+            throw new Error('Complete all company and owner fields.');
+        }
+
+        const existing = users.find(user => user.email === email);
+        if (existing) {
+            throw new Error('An account with that email already exists');
+        }
+
+        const user = {
+            id: 'local-user-' + Date.now(),
+            tenant_id: 'local-tenant-' + Date.now(),
+            name,
+            email,
+            role: 'owner',
+            password_hash: await hashValue(password),
+            is_active: true,
+            created_at: new Date().toISOString(),
+            company: {
+                id: 'local-tenant-' + Date.now(),
+                name: companyName,
+                business_type: businessType,
+                country: 'GH',
+                currency: 'GHS'
+            }
+        };
+
+        const nextUsers = [...users, user];
+        saveLocalUsers(nextUsers);
+
+        return {
+            accessToken: 'local-demo-token',
+            refreshToken: 'local-demo-refresh',
+            user: { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role },
+            company: user.company
+        };
+    }
+
+    if (path === '/api/auth/login') {
+        const email = String(credentials?.email || '').trim().toLowerCase();
+        const password = String(credentials?.password || '');
+        const user = users.find(candidate => candidate.email === email && candidate.is_active !== false);
+        if (!user) {
+            throw new Error('Invalid email or password');
+        }
+
+        const passwordHash = await hashValue(password);
+        if (user.password_hash !== passwordHash) {
+            throw new Error('Invalid email or password');
+        }
+
+        return {
+            accessToken: 'local-demo-token',
+            refreshToken: 'local-demo-refresh',
+            user: { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role },
+            company: user.company || { id: user.tenant_id, name: 'Local Business', business_type: 'Other', country: 'GH', currency: 'GHS' }
+        };
+    }
+
+    return null;
+}
 
 async function apiRequest(path, options = {}, token = '') {
     const controller = new AbortController();
@@ -207,6 +305,7 @@ function AppProvider({ children }) {
     const [auditLogs, setAuditLogs] = useState(() => DB.get('auditLogs', []));
     const [cart, setCart] = useState([]);
     const [parkedCarts, setParkedCarts] = useState(() => DB.get('parkedCarts', []));
+    const [heldSales, setHeldSales] = useState(() => DB.get('heldSales', []));
     const savedSession = DB.get(SESSION_KEY, null);
     const [currentUser, setCurrentUser] = useState(() => savedSession?.user || null);
     const [currentCompany, setCurrentCompany] = useState(() => savedSession?.company || null);
@@ -216,17 +315,39 @@ function AppProvider({ children }) {
         setProducts([]); setSales([]); setCustomers([]); setSuppliers([]); setExpenses([]);
         setUsers([]); setRegister({ isOpen: false, openingCash: 0, openedAt: null });
         setStockMovements([]); setPurchases([]); setAuditLogs([]);
-        setParkedCarts([]); DB.set('parkedCarts', []);
+        setParkedCarts([]); setHeldSales([]); DB.set('parkedCarts', []); DB.set('heldSales', []);
     };
 
     const refreshTenantData = async () => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
         if (!token) return;
+        if (token === 'local-demo-token') {
+            const localUsers = getLocalUsers();
+            const currentSession = DB.get(SESSION_KEY, null);
+            const localOwner = localUsers.find(user => user.id === currentSession?.user?.id) || localUsers[0];
+            const company = localOwner?.company || { id: 'local-tenant', name: 'Local Business', business_type: 'Other', country: 'GH', currency: 'GHS' };
+            setProducts(DB.get('products', []));
+            setGroups(DB.get('groups', []));
+            setQuickSellItems(DB.get('quickSellItems', []));
+            setSales(DB.get('sales', []));
+            setCustomers(DB.get('customers', []));
+            setSuppliers(DB.get('suppliers', []));
+            setExpenses(DB.get('expenses', []));
+            setUsers(localUsers);
+            setRegister(DB.get('register', { isOpen: false, openingCash: 0, openedAt: null }));
+            setStockMovements(DB.get('stockMovements', []));
+            setPurchases(DB.get('purchases', []));
+            setAuditLogs(DB.get('auditLogs', []));
+            setHeldSales(DB.get('heldSales', []));
+            setCurrentCompany(company);
+            return;
+        }
         const data = await apiRequest('/api/bootstrap', {}, token);
         setProducts(data.products || []); setGroups(data.groups || []); setQuickSellItems(data.quickSellItems || []); setSales(data.sales || []); setCustomers(data.customers || []);
         setSuppliers(data.suppliers || []); setExpenses(data.expenses || []); setUsers(data.users || []);
         setRegister(data.register || { isOpen: false, openingCash: 0, openedAt: null });
         setStockMovements(data.stockMovements || []); setPurchases(data.purchases || []); setAuditLogs(data.auditLogs || []);
+        setHeldSales(data.heldSales || DB.get('heldSales', []));
     };
 
     const apiMutation = (path, method, body, successMessage) => {
@@ -240,7 +361,10 @@ function AppProvider({ children }) {
     const authenticate = async (path, credentials) => {
         let session;
         try {
-            session = await apiRequest(path, { method: 'POST', body: JSON.stringify(credentials) });
+            session = await attemptLocalAuth(path, credentials);
+            if (!session) {
+                session = await apiRequest(path, { method: 'POST', body: JSON.stringify(credentials) });
+            }
         } catch (error) {
             if (error instanceof TypeError || error.message === 'Failed to fetch' || error.message.includes('too long')) {
                 throw new Error('Unable to complete your request right now. Please try again.');
@@ -443,9 +567,24 @@ function AppProvider({ children }) {
 
     const parkCart = (name) => {
         if (!cart.length) return false;
+        const snapshot = {
+            id: 'cart' + Date.now(),
+            name: name || `Customer ${parkedCarts.length + 1}`,
+            items: cart,
+            subtotal: cart.reduce((sum, c) => sum + c.quantity * c.product.sellingPrice, 0),
+            total: cart.reduce((sum, c) => sum + c.quantity * c.product.sellingPrice, 0),
+            savedAt: new Date().toISOString(),
+            customerName: name || 'Walk-in Customer',
+            status: 'held'
+        };
         setParkedCarts(prev => {
-            const next = [...prev, { id: 'cart' + Date.now(), name: name || `Customer ${prev.length + 1}`, items: cart, savedAt: new Date().toISOString() }];
+            const next = [...prev, snapshot];
             DB.set('parkedCarts', next);
+            return next;
+        });
+        setHeldSales(prev => {
+            const next = [...prev, { ...snapshot, type: 'held-sale' }];
+            DB.set('heldSales', next);
             return next;
         });
         setCart([]);
@@ -453,7 +592,7 @@ function AppProvider({ children }) {
     };
 
     const resumeCart = (id) => {
-        const parked = parkedCarts.find(item => item.id === id);
+        const parked = parkedCarts.find(item => item.id === id) || heldSales.find(item => item.id === id);
         if (!parked) return;
         if (cart.length) parkCart('Previous customer');
         setCart(parked.items);
@@ -462,6 +601,32 @@ function AppProvider({ children }) {
             DB.set('parkedCarts', next);
             return next;
         });
+        setHeldSales(prev => {
+            const next = prev.filter(item => item.id !== id);
+            DB.set('heldSales', next);
+            return next;
+        });
+    };
+
+    const createHeldSale = (meta = {}) => {
+        if (!cart.length) return null;
+        const payload = {
+            id: 'held' + Date.now(),
+            name: meta.customerName || `Held sale ${heldSales.length + 1}`,
+            customerName: meta.customerName || 'Walk-in Customer',
+            customerPhone: meta.customerPhone || '',
+            items: cart,
+            subtotal: cart.reduce((sum, c) => sum + c.quantity * c.product.sellingPrice, 0),
+            discount: Number(meta.discount) || 0,
+            total: cart.reduce((sum, c) => sum + c.quantity * c.product.sellingPrice, 0) - (Number(meta.discount) || 0),
+            status: 'held',
+            savedAt: new Date().toISOString()
+        };
+        const next = [payload, ...heldSales];
+        setHeldSales(next);
+        DB.set('heldSales', next);
+        setCart([]);
+        return payload;
     };
 
     const completeSale = (saleData) => {
@@ -544,8 +709,10 @@ function AppProvider({ children }) {
         cart,
         setCart,
         parkedCarts,
+        heldSales,
         parkCart,
         resumeCart,
+        createHeldSale,
         currentUser,
         setCurrentUser,
         currentCompany,
@@ -732,7 +899,7 @@ function ProductCard({ product, onEdit, onDelete, onAddToCart, onAdjustStock }) 
 
 // ---- Cart Sidebar ----
 function CartSidebar({ isOpen, onClose }) {
-    const { cart, removeFromCart, updateCartQty, clearCart, products, completeSale, showToast, parkedCarts, parkCart, resumeCart } = useApp();
+    const { cart, removeFromCart, updateCartQty, clearCart, products, completeSale, showToast, parkedCarts, heldSales, parkCart, resumeCart, createHeldSale } = useApp();
     const [showCheckout, setShowCheckout] = useState(false);
     const [customerName, setCustomerName] = useState('');
     const [customerPhone, setCustomerPhone] = useState('');
@@ -804,12 +971,13 @@ function CartSidebar({ isOpen, onClose }) {
             )
         ),
         React.createElement('div', { className: 'flex gap-2 p-3 border-b border-gray-100 bg-gray-50' },
-            React.createElement('button', { onClick: () => { const name = window.prompt('Name this pending cart', 'Customer'); if (name !== null && parkCart(name)) showToast('Cart saved as pending'); }, disabled: !cart.length, className: 'flex-1 btn-secondary text-xs disabled:opacity-50' }, '⏸ Park cart'),
+            React.createElement('button', { onClick: () => { const name = window.prompt('Name this held sale', 'Customer'); if (name !== null && parkCart(name)) showToast('Sale held and ready to resume'); }, disabled: !cart.length, className: 'flex-1 btn-secondary text-xs disabled:opacity-50' }, '⏸ Hold Sale'),
+            React.createElement('button', { onClick: () => { const name = window.prompt('Name this held sale', 'Customer'); if (name !== null && createHeldSale({ customerName: name })) showToast('Held sale saved'); }, disabled: !cart.length, className: 'flex-1 btn-secondary text-xs disabled:opacity-50' }, '🗃 Save Hold'),
             React.createElement('button', { onClick: clearCart, disabled: !cart.length, className: 'flex-1 btn-secondary text-xs disabled:opacity-50' }, 'Clear cart')
         ),
-        parkedCarts.length > 0 && React.createElement('div', { className: 'px-3 py-2 border-b border-amber-100 bg-amber-50' },
-            React.createElement('p', { className: 'text-xs font-semibold text-amber-800 mb-1' }, 'Pending carts'),
-            parkedCarts.map(item => React.createElement('button', { key: item.id, onClick: () => resumeCart(item.id), className: 'w-full flex justify-between text-xs text-amber-900 py-1 hover:underline' }, React.createElement('span', null, item.name), React.createElement('span', null, item.items.reduce((sum, line) => sum + line.quantity, 0), ' items')))
+        (parkedCarts.length > 0 || heldSales.length > 0) && React.createElement('div', { className: 'px-3 py-2 border-b border-amber-100 bg-amber-50' },
+            React.createElement('p', { className: 'text-xs font-semibold text-amber-800 mb-1' }, 'Held sales'),
+            [...parkedCarts, ...heldSales].slice(0, 6).map(item => React.createElement('button', { key: item.id, onClick: () => resumeCart(item.id), className: 'w-full flex justify-between text-xs text-amber-900 py-1 hover:underline' }, React.createElement('span', null, item.name || item.customerName || 'Held sale'), React.createElement('span', null, (item.items || []).reduce((sum, line) => sum + line.quantity, 0), ' items')))
         ),
         React.createElement('div', { className: 'flex-1 overflow-y-auto p-4', style: { maxHeight: 'calc(100vh - 180px)' } },
             cart.length === 0 ?

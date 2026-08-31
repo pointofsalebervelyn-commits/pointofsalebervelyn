@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     action TEXT NOT NULL, details TEXT, user_id UUID REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS held_sales (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    cashier_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    customer_name TEXT NOT NULL DEFAULT 'Walk-in Customer', customer_phone TEXT,
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0, discount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    total NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'held' CHECK (status IN ('active', 'held', 'completed', 'cancelled')),
+    notes TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    held_at TIMESTAMPTZ, resumed_at TIMESTAMPTZ
+);
 
 CREATE INDEX IF NOT EXISTS customers_tenant_idx ON customers (tenant_id);
 CREATE INDEX IF NOT EXISTS suppliers_tenant_idx ON suppliers (tenant_id);
