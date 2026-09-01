@@ -430,26 +430,29 @@ function AppProvider({ children }) {
 
     const addProduct = (p) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { apiRequest('/api/products', { method: 'POST', body: JSON.stringify(p) }, token).then(() => refreshTenantData()).then(() => showToast('Product added successfully!')).catch(error => showToast(error.message, 'error')); return; }
+        if (token) { return apiRequest('/api/products', { method: 'POST', body: JSON.stringify(p) }, token).then(() => refreshTenantData()).then(() => { showToast('Product added successfully!'); }); }
         setProducts(prev => [...prev, { ...p, id: 'p' + Date.now(), dateAdded: new Date().toISOString() }]);
         logAction('Product added', p.name);
         showToast('Product added successfully!');
+        return Promise.resolve();
     };
 
     const updateProduct = (id, data) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { apiRequest(`/api/products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }, token).then(() => refreshTenantData()).then(() => showToast('Product updated!')).catch(error => showToast(error.message, 'error')); return; }
+        if (token) { return apiRequest(`/api/products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }, token).then(() => refreshTenantData()).then(() => { showToast('Product updated!'); }); }
         setProducts(prev => prev.map(p => p.id === id ? { ...p, ...data } : p));
         logAction('Product updated', id);
         showToast('Product updated!');
+        return Promise.resolve();
     };
 
     const deleteProduct = (id) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { apiRequest(`/api/products/${id}`, { method: 'DELETE' }, token).then(() => refreshTenantData()).then(() => showToast('Product removed.', 'info')).catch(error => showToast(error.message, 'error')); return; }
+        if (token) { return apiRequest(`/api/products/${id}`, { method: 'DELETE' }, token).then(() => refreshTenantData()).then(() => { showToast('Product archived.', 'info'); }); }
         setProducts(prev => prev.filter(p => p.id !== id));
         logAction('Product deleted', id);
-        showToast('Product removed.', 'info');
+        showToast('Product archived.', 'info');
+        return Promise.resolve();
     };
 
     const adjustStock = (productId, quantity, reason = 'Manual adjustment') => {
@@ -631,7 +634,7 @@ function AppProvider({ children }) {
 
     const completeSale = (saleData) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(saleData) }, token).then(() => refreshTenantData()).then(() => { clearCart(); showToast('Sale completed! Receipt generated.'); }).catch(error => showToast(error.message, 'error')); return null; }
+        if (token) { return apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(saleData) }, token).then(() => refreshTenantData()).then(() => { clearCart(); showToast('Sale completed! Receipt generated.'); }); }
         // Reduce inventory
         const updatedProducts = products.map(p => {
             const item = saleData.items.find(i => i.productId === p.id);
@@ -674,6 +677,7 @@ function AppProvider({ children }) {
                     totalSpent: saleData.total, purchaseCount: 1 }];
             });
         }
+        return Promise.resolve();
         clearCart();
         showToast('Sale completed! Receipt generated.');
         return newSale;
@@ -905,13 +909,15 @@ function CartSidebar({ isOpen, onClose }) {
     const [customerPhone, setCustomerPhone] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('Cash');
     const [cashReceived, setCashReceived] = useState('');
+    const [processingSale, setProcessingSale] = useState(false);
 
     const totalItems = cart.reduce((sum, c) => sum + c.quantity, 0);
     const totalAmount = cart.reduce((sum, c) => sum + c.quantity * c.product.sellingPrice, 0);
     const totalProfit = cart.reduce((sum, c) => sum + c.quantity * (c.product.sellingPrice - c.product.buyingPrice),
     0);
 
-    const handleCheckout = () => {
+    const handleCheckout = async () => {
+        if (processingSale) return;
         if (cart.length === 0) { showToast('Cart is empty', 'error'); return; }
         // Check stock
         for (const item of cart) {
@@ -942,13 +948,20 @@ function CartSidebar({ isOpen, onClose }) {
             cashReceived: paymentMethod === 'Cash' ? received : 0,
             change: paymentMethod === 'Cash' ? received - totalAmount : 0
         };
-        completeSale(saleData);
-        setCustomerName('');
-        setCustomerPhone('');
-        setPaymentMethod('Cash');
-        setCashReceived('');
-        setShowCheckout(false);
-        onClose();
+        setProcessingSale(true);
+        try {
+            await completeSale(saleData);
+            setCustomerName('');
+            setCustomerPhone('');
+            setPaymentMethod('Cash');
+            setCashReceived('');
+            setShowCheckout(false);
+            onClose();
+        } catch (error) {
+            showToast(error.message || 'Sale could not be completed. Your transaction was not saved.', 'error');
+        } finally {
+            setProcessingSale(false);
+        }
     };
 
     return React.createElement('div', {
@@ -1489,6 +1502,7 @@ function ProductForm({ product, onClose, mode }) {
     });
     const [form, setForm] = useState(() => getDefaultForm(product));
     const [imageFile, setImageFile] = useState(null);
+    const [saving, setSaving] = useState(false);
     const fileInputRef = useRef(null);
 
     useEffect(() => {
@@ -1529,21 +1543,25 @@ function ProductForm({ product, onClose, mode }) {
     ];
     const units = ['piece', 'box', 'bag', 'meter', 'carton', 'bottle', 'can', 'roll', 'sheet', 'kg', 'g', 'L', 'mL'];
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
+        if (saving) return;
         if (!form.name.trim()) { showToast('Product name is required', 'error'); return; }
         if (form.buyingPrice < 0 || form.sellingPrice <= 0 || form.quantity < 0 || form.minStockLevel < 0) {
             showToast('Enter valid prices and stock quantities', 'error');
             return;
         }
         const data = { ...form };
-        if (mode === 'add') {
-            addProduct(data);
-            showToast('Product added successfully');
-        } else if (product) {
-            updateProduct(product.id, data);
+        setSaving(true);
+        try {
+            if (mode === 'add') await addProduct(data);
+            else if (product) await updateProduct(product.id, data);
+            onClose();
+        } catch (error) {
+            showToast(error.message || 'Unable to save product. Please try again.', 'error');
+        } finally {
+            setSaving(false);
         }
-        onClose();
     };
 
     const handleImageUpload = async (e) => {
@@ -1746,7 +1764,7 @@ function ProductForm({ product, onClose, mode }) {
             React.createElement('button', {
                 type: 'submit',
                 className: 'btn-primary'
-            }, mode === 'add' ? 'Add Product' : 'Update Product')
+            }, saving ? 'Saving...' : (mode === 'add' ? 'Add Product' : 'Update Product'))
         )
     );
 }

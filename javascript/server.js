@@ -250,7 +250,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res, next) => {
     try {
         const tenantId = req.user.tenant_id;
         const [products, sales, customers, suppliers, expenses, users, register, movements, purchases, auditLogs, groups, quickSellItems] = await Promise.all([
-            pool.query(`${productSelect} WHERE tenant_id = $1 ORDER BY created_at DESC`, [tenantId]),
+            pool.query(`${productSelect} WHERE tenant_id = $1 AND is_active = true ORDER BY created_at DESC`, [tenantId]),
             pool.query(`SELECT id, customer_name AS "customerName", customer_phone AS "customerPhone", payment_method AS "paymentMethod", items, total, profit, cash_received AS "cashReceived", change_amount AS "change", status, refunded_at AS "refundedAt", created_at AS date FROM sales WHERE tenant_id = $1 ORDER BY created_at`, [tenantId]),
             pool.query(`SELECT id, name, phone, last_purchase AS "lastPurchase", total_spent AS "totalSpent", purchase_count AS "purchaseCount" FROM customers WHERE tenant_id = $1`, [tenantId]),
             pool.query(`SELECT id, name, contact, phone FROM suppliers WHERE tenant_id = $1`, [tenantId]),
@@ -321,7 +321,12 @@ app.patch('/api/products/:id', requireAuth, async (req, res, next) => {
 });
 
 app.delete('/api/products/:id', requireAuth, async (req, res, next) => {
-    try { const result = await pool.query('DELETE FROM products WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'Product not found' }); await addAudit(pool, req.user.tenant_id, req.user.id, 'Product deleted', req.params.id); res.status(204).end(); } catch (error) { next(error); }
+    try {
+        const result = await pool.query('UPDATE products SET is_active=false, updated_at=now() WHERE id=$1 AND tenant_id=$2 AND is_active=true RETURNING id', [req.params.id, req.user.tenant_id]);
+        if (!result.rowCount) return res.status(404).json({ error: 'Product not found' });
+        await addAudit(pool, req.user.tenant_id, req.user.id, 'Product archived', req.params.id);
+        res.status(204).end();
+    } catch (error) { next(error); }
 });
 
 app.post('/api/products/:id/stock-adjustments', requireAuth, async (req, res, next) => {
@@ -331,7 +336,10 @@ app.post('/api/products/:id/stock-adjustments', requireAuth, async (req, res, ne
 });
 
 app.post('/api/sales', requireAuth, async (req, res, next) => {
-    const sale = req.body || {}; if (!Array.isArray(sale.items) || !sale.items.length) return res.status(400).json({ error: 'Sale items are required' });
+    const sale = req.body || {};
+    if (!Array.isArray(sale.items) || !sale.items.length || sale.items.some(item => !item.productId || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0)) {
+        return res.status(400).json({ error: 'Valid sale items are required' });
+    }
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -441,7 +449,7 @@ app.delete('/api/held-sales/:id', requireAuth, async (req, res, next) => {
 app.get('/api/products', requireAuth, async (req, res, next) => {
     try {
         const result = await pool.query(
-            'SELECT id, name, sku, selling_price, buying_price, quantity, created_at FROM products WHERE tenant_id = $1 ORDER BY created_at DESC',
+            'SELECT id, name, sku, selling_price, buying_price, quantity, created_at FROM products WHERE tenant_id = $1 AND is_active = true ORDER BY created_at DESC',
             [req.user.tenant_id]
         );
         res.json({ products: result.rows });
