@@ -677,7 +677,6 @@ function AppProvider({ children }) {
                     totalSpent: saleData.total, purchaseCount: 1 }];
             });
         }
-        return Promise.resolve();
         clearCart();
         showToast('Sale completed! Receipt generated.');
         return newSale;
@@ -722,6 +721,7 @@ function AppProvider({ children }) {
         currentCompany,
         authenticate,
         logout,
+        refreshTenantData,
         apiMutation,
         toast,
         showToast,
@@ -2337,7 +2337,7 @@ React.createElement('span', { className: 'text-sm font-medium text-amber-600' },
 
 // ---- Settings / Users ----
 function SettingsPage() {
-const { users, setUsers, currentUser, showToast, auditLogs, authenticate, logout, apiMutation } = useApp();
+const { users, setUsers, currentUser, showToast, auditLogs, authenticate, logout, refreshTenantData } = useApp();
 const safeUsers = Array.isArray(users) ? users : [];
 const safeAuditLogs = Array.isArray(auditLogs) ? auditLogs : [];
 const hasSession = Boolean(DB.get(SESSION_KEY, null)?.accessToken);
@@ -2433,12 +2433,27 @@ showToast(error.message, 'error');
 } finally { setIsChangingPassword(false); }
 };
 
-const handleAddUser = () => {
+const handleAddUser = async () => {
 if (!['owner', 'manager'].includes(currentUser?.role)) { showToast('Only the owner or a manager can manage staff', 'error'); return; }
-if (!form.name.trim() || !form.email.trim() || !form.password.trim()) { showToast('Name, email, and password required', 'error'); return; }
-if (users.find(u => u.name === form.name)) { showToast('User already exists', 'error'); return; }
-if (apiMutation('/api/users', 'POST', form, 'User added')) { setForm({ name: '', email: '', password: '', role: 'cashier' }); setShowAdd(false); return; }
-setUsers(prev => [...prev, { ...form, id: 'u' + Date.now() }]);
+const email = form.email.trim().toLowerCase();
+if (!form.name.trim() || !isValidEmail(email) || form.password.length < 12 || form.password.length > 128) {
+showToast('Name, valid email, and a 12-128 character password are required', 'error');
+return;
+}
+if (safeUsers.find(u => u.email?.toLowerCase() === email)) { showToast('That email is already in use', 'error'); return; }
+const userData = { ...form, name: form.name.trim(), email };
+const token = DB.get(SESSION_KEY, null)?.accessToken;
+if (token && token !== 'local-demo-token') {
+try {
+await apiRequest('/api/users', { method: 'POST', body: JSON.stringify(userData) }, token);
+await refreshTenantData();
+showToast('User added');
+setForm({ name: '', email: '', password: '', role: 'cashier' });
+setShowAdd(false);
+} catch (error) { showToast(error.message, 'error'); }
+return;
+}
+setUsers(prev => [...prev, { ...userData, id: 'u' + Date.now() }]);
 showToast('User added');
 setForm({ name: '', email: '', password: '', role: 'cashier' });
 setShowAdd(false);
