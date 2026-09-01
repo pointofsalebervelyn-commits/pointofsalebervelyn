@@ -3,14 +3,17 @@
   "short_name": "KoraPoint",
   "description": "Point-of-sale workspace for growing businesses",
   "start_url": "../html/",
+  "scope": "../",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
-  "orientation": "any",
+  "orientation": "portrait-primary",
+  "id": "/KoraPoint/",
+  "categories": ["business", "finance", "productivity"],
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%23f59e0b'/%3E%3Ctext x='96' y='125' text-anchor='middle' font-size='100'%3EK%3C/text%3E%3C/svg%3E",
-      "sizes": "192x192",
+      "src": "../assets/korapoint-icon.svg",
+      "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }

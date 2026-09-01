@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="KoraPoint icon">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" x2="1">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <rect x="86" y="118" width="340" height="250" rx="68" fill="#f8fafc" opacity="0.96"/>
+  <path d="M152 168h72v180h-72z" fill="#dbeafe" opacity="0.9"/>
+  <path d="M288 168h72v180h-72z" fill="#dbeafe" opacity="0.9"/>
+  <path d="M178 238h160v36H178z" fill="#0f172a" opacity="0.12"/>
+  <circle cx="196" cy="220" r="22" fill="#f59e0b"/>
+  <circle cx="316" cy="220" r="22" fill="#f59e0b"/>
+  <path d="M210 320c22 28 70 28 92 0" fill="none" stroke="#0f172a" stroke-width="18" stroke-linecap="round"/>
+  <path d="M124 205l40-35m220 35l40-35" fill="none" stroke="url(#gold)" stroke-width="26" stroke-linecap="round"/>
+  <path d="M80 374h352" stroke="url(#gold)" stroke-width="24" stroke-linecap="round" opacity="0.9"/>
+</svg>

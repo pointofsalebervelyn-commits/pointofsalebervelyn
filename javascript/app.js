@@ -1169,9 +1169,10 @@ function RegisterPanel({ sales }) {
 
 // ---- Dashboard ----
 function Dashboard() {
-    const { products, sales } = useApp();
+    const { products, sales, currentUser } = useApp();
     const [chartRef, setChartRef] = useState(null);
     const chartInstance = useRef(null);
+    const isCashier = currentUser?.role === 'cashier';
 
     const totalProducts = products.length;
     const totalStock = products.reduce((sum, p) => sum + p.quantity, 0);
@@ -1224,27 +1225,25 @@ function Dashboard() {
         React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3' },
             React.createElement(StatCard, { icon: '📦', label: 'Products', value: totalProducts, color: 'amber' }),
             React.createElement(StatCard, { icon: '📊', label: 'Total Stock', value: totalStock, color: 'blue' }),
-                React.createElement(StatCard, { icon: '💰', label: "Today's Sales", value: formatCurrency(todayRevenue),
-                    sub: todaySales.length + ' orders', color: 'emerald' }),
-                React.createElement(StatCard, { icon: '📈', label: 'Weekly Sales', value: formatCurrency(weekRevenue),
-                    sub: weekSales.length + ' orders', color: 'violet' }),
-                React.createElement(StatCard, { icon: '📅', label: 'Monthly Sales', value: formatCurrency(monthRevenue),
-                    sub: monthSales.length + ' orders', color: 'cyan' }),
-                React.createElement(StatCard, { icon: '🏦', label: 'Total Revenue', value: formatCurrency(totalRevenue), color: 'emerald' }),
+            !isCashier && React.createElement(StatCard, { icon: '💰', label: "Today's Sales", value: formatCurrency(todayRevenue),
+                sub: todaySales.length + ' orders', color: 'emerald' }),
+            !isCashier && React.createElement(StatCard, { icon: '📈', label: 'Weekly Sales', value: formatCurrency(weekRevenue),
+                sub: weekSales.length + ' orders', color: 'violet' }),
+            !isCashier && React.createElement(StatCard, { icon: '📅', label: 'Monthly Sales', value: formatCurrency(monthRevenue),
+                sub: monthSales.length + ' orders', color: 'cyan' }),
+            !isCashier && React.createElement(StatCard, { icon: '🏦', label: 'Total Revenue', value: formatCurrency(totalRevenue), color: 'emerald' }),
             React.createElement(StatCard, { icon: '⚠️', label: 'Low Stock', value: lowStockItems.length,
                 sub: outOfStockItems.length + ' out of stock', color: 'rose' }),
-            React.createElement(StatCard, { icon: '🔄', label: 'Recent Sales', value: recentSales.length,
+            !isCashier && React.createElement(StatCard, { icon: '🔄', label: 'Recent Sales', value: recentSales.length,
                 sub: 'last 5 transactions', color: 'blue' })
         ),
-            React.createElement(RegisterPanel, { sales }),
-        // Chart
-        React.createElement('div', { className: 'stat-card p-4' },
+        !isCashier && React.createElement(RegisterPanel, { sales }),
+        !isCashier && React.createElement('div', { className: 'stat-card p-4' },
             React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' },
                 '📊 Last 7 Days Sales'),
             React.createElement('div', { className: 'chart-container' },
                 React.createElement('canvas', { ref: setChartRef }))
         ),
-        // Low stock & recent sales
         React.createElement('div', { className: 'grid md:grid-cols-2 gap-4' },
             React.createElement('div', { className: 'stat-card p-4' },
                 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' },
@@ -1262,7 +1261,7 @@ function Dashboard() {
                     )
                 )
             ),
-            React.createElement('div', { className: 'stat-card p-4' },
+            !isCashier && React.createElement('div', { className: 'stat-card p-4' },
                 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' },
                     '🔄 Recently Sold'),
                 recentSales.length === 0 ?
@@ -1474,22 +1473,28 @@ function ProductsPage() {
 // ---- Product Form ----
 function ProductForm({ product, onClose, mode }) {
     const { addProduct, updateProduct, showToast } = useApp();
-    const [form, setForm] = useState({
-        name: product?.name || '',
-        image: product?.image || '📦',
-        category: product?.category || 'Cement',
-        materialType: product?.materialType || '',
-        supplier: product?.supplier || '',
-        buyingPrice: product?.buyingPrice || 0,
-        sellingPrice: product?.sellingPrice || 0,
-        quantity: product?.quantity || 0,
-        minStockLevel: product?.minStockLevel || 5,
-        unit: product?.unit || 'piece',
-        description: product?.description || '',
-        barcode: product?.barcode || '',
+    const getDefaultForm = (selectedProduct = null) => ({
+        name: selectedProduct?.name || '',
+        image: selectedProduct?.image || '📦',
+        category: selectedProduct?.category || 'Cement',
+        materialType: selectedProduct?.materialType || '',
+        supplier: selectedProduct?.supplier || '',
+        buyingPrice: selectedProduct?.buyingPrice ?? 0,
+        sellingPrice: selectedProduct?.sellingPrice ?? 0,
+        quantity: selectedProduct?.quantity ?? 0,
+        minStockLevel: selectedProduct?.minStockLevel ?? 5,
+        unit: selectedProduct?.unit || 'piece',
+        description: selectedProduct?.description || '',
+        barcode: selectedProduct?.barcode || '',
     });
+    const [form, setForm] = useState(() => getDefaultForm(product));
     const [imageFile, setImageFile] = useState(null);
     const fileInputRef = useRef(null);
+
+    useEffect(() => {
+        setForm(getDefaultForm(product));
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    }, [product, mode]);
 
     const readImageFile = (file) => new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -2465,7 +2470,7 @@ React.createElement('div', { className: 'text-center text-xs text-gray-500 mb-3'
 React.createElement('span', null, showSignup ? 'Already have an account?' : 'Need a company account?'),
 React.createElement('button', {
   type: 'button',
-  onClick: () => {
+  onClick: () =>  {
     setShowSignup(!showSignup);
     setAuthMessage('');
   },
@@ -2547,6 +2552,7 @@ React.createElement('div', { className: 'login-visual-footer' }, 'A calmer way t
 )
 );
 }
+
 
 return React.createElement('div', { className: 'space-y-4' },
 React.createElement('div', { className: 'flex items-center justify-between' },
@@ -2735,6 +2741,8 @@ const closeTour = () => {
     setTourStep(null);
 };
 
+const isCashier = currentUser?.role === 'cashier';
+const restrictedPages = ['suppliers', 'expenses', 'reports'];
 const navItems = [
 { id: 'dashboard', label: 'Dashboard', icon: '📊' },
 { id: 'products', label: 'Products', icon: '📦' },
@@ -2743,9 +2751,13 @@ const navItems = [
 { id: 'expenses', label: 'Expenses', icon: '💸' },
 { id: 'reports', label: 'Reports', icon: '📈' },
 { id: 'settings', label: 'Settings', icon: '⚙️' },
-];
+].filter(item => !isCashier || !restrictedPages.includes(item.id));
 
 const renderPage = () => {
+if (isCashier && restrictedPages.includes(currentPage)) {
+    return React.createElement(Dashboard);
+}
+
 switch (currentPage) {
 case 'dashboard':
 return React.createElement(Dashboard);
