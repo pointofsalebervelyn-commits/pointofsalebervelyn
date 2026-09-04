@@ -353,9 +353,8 @@ function AppProvider({ children }) {
     const apiMutation = (path, method, body, successMessage) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
         if (!token) return false;
-        apiRequest(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, token)
-            .then(() => refreshTenantData()).then(() => showToast(successMessage)).catch(error => showToast(error.message, 'error'));
-        return true;
+        return apiRequest(path, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }, token)
+            .then(() => refreshTenantData()).then(() => { showToast(successMessage); });
     };
 
     const authenticate = async (path, credentials) => {
@@ -1968,14 +1967,16 @@ const [editing, setEditing] = useState(null);
 const [form, setForm] = useState({ name: '', contact: '', phone: '' });
 const [purchaseForm, setPurchaseForm] = useState({ productId: '', supplier: '', quantity: 1, unitCost: 0 });
 
-const handleSave = () => {
+const handleSave = async () => {
 if (!form.name.trim()) { showToast('Supplier name is required', 'error'); return; }
 if (editing) {
-if (apiMutation(`/api/suppliers/${editing.id}`, 'PATCH', form, 'Supplier updated')) { setForm({ name: '', contact: '', phone: '' }); setEditing(null); setShowAdd(false); return; }
+const mutation = apiMutation(`/api/suppliers/${editing.id}`, 'PATCH', form, 'Supplier updated');
+if (mutation) { try { await mutation; setForm({ name: '', contact: '', phone: '' }); setEditing(null); setShowAdd(false); } catch (error) { showToast(error.message, 'error'); } return; }
 setSuppliers(prev => prev.map(s => s.id === editing.id ? { ...s, ...form } : s));
 showToast('Supplier updated');
 } else {
-if (apiMutation('/api/suppliers', 'POST', form, 'Supplier added')) { setForm({ name: '', contact: '', phone: '' }); setEditing(null); setShowAdd(false); return; }
+const mutation = apiMutation('/api/suppliers', 'POST', form, 'Supplier added');
+if (mutation) { try { await mutation; setForm({ name: '', contact: '', phone: '' }); setEditing(null); setShowAdd(false); } catch (error) { showToast(error.message, 'error'); } return; }
 setSuppliers(prev => [...prev, { ...form, id: 's' + Date.now() }]);
 showToast('Supplier added');
 }
@@ -1984,9 +1985,10 @@ setEditing(null);
 setShowAdd(false);
 };
 
-const handleDelete = (id) => {
+const handleDelete = async (id) => {
 if (window.confirm('Delete this supplier?')) {
-if (apiMutation(`/api/suppliers/${id}`, 'DELETE', undefined, 'Supplier removed')) return;
+const mutation = apiMutation(`/api/suppliers/${id}`, 'DELETE', undefined, 'Supplier removed');
+if (mutation) { try { await mutation; } catch (error) { showToast(error.message, 'error'); } return; }
 setSuppliers(prev => prev.filter(s => s.id !== id));
 showToast('Supplier removed', 'info');
 }
@@ -2120,9 +2122,10 @@ const [form, setForm] = useState({ description: '', amount: 0, category: 'Utilit
 
 const categories = ['Utilities', 'Rent', 'Salaries', 'Supplies', 'Transport', 'Maintenance', 'Other'];
 
-const handleSave = () => {
+const handleSave = async () => {
 if (!form.description.trim() || form.amount <= 0) { showToast('Please fill in all fields', 'error'); return; }
-if (apiMutation('/api/expenses', 'POST', form, 'Expense added')) { setForm({ description: '', amount: 0, category: 'Utilities', date: new Date().toISOString().split('T')[0] }); setShowAdd(false); return; }
+const mutation = apiMutation('/api/expenses', 'POST', form, 'Expense added');
+if (mutation) { try { await mutation; setForm({ description: '', amount: 0, category: 'Utilities', date: new Date().toISOString().split('T')[0] }); setShowAdd(false); } catch (error) { showToast(error.message, 'error'); } return; }
 setExpenses(prev => [...prev, { ...form, id: 'e' + Date.now() }]);
 showToast('Expense added');
 setForm({ description: '', amount: 0, category: 'Utilities', date: new Date().toISOString().split('T')[0] });
@@ -2346,7 +2349,7 @@ const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cas
 const [showStaffPassword, setShowStaffPassword] = useState(false);
 const [loginUser, setLoginUser] = useState({ email: '', password: '' });
 const [signup, setSignup] = useState({ accessCode: '', companyName: '', businessType: '', name: '', email: '', password: '' });
-const [showSignup, setShowSignup] = useState(false);
+const showSignup = false;
 const [isSubmitting, setIsSubmitting] = useState(false);
 const [authMessage, setAuthMessage] = useState('');
 const [showAuthPassword, setShowAuthPassword] = useState(false);
@@ -2406,7 +2409,6 @@ setIsSubmitting(true);
 setAuthMessage('Creating your company account...');
 const session = await authenticate('/api/auth/signup', signup);
 setIsLogin(false);
-setShowSignup(false);
 showToast('Company created. Welcome, ' + session.user.name);
 } catch (error) {
 setAuthMessage(error.message);
@@ -2459,11 +2461,12 @@ setForm({ name: '', email: '', password: '', role: 'cashier' });
 setShowAdd(false);
 };
 
-const handleDeleteUser = (id) => {
+const handleDeleteUser = async (id) => {
 if (!['owner', 'manager'].includes(currentUser?.role)) { showToast('Only the owner or a manager can revoke access', 'error'); return; }
 if (id === currentUser?.id) { showToast('Cannot delete yourself', 'error'); return; }
 if (window.confirm('Delete this user?')) {
-if (apiMutation(`/api/users/${id}`, 'DELETE', undefined, 'User removed')) return;
+const mutation = apiMutation(`/api/users/${id}`, 'DELETE', undefined, 'User removed');
+if (mutation) { try { await mutation; } catch (error) { showToast(error.message, 'error'); } return; }
 setUsers(prev => prev.filter(u => u.id !== id));
 showToast('User removed', 'info');
 }
@@ -2499,17 +2502,6 @@ React.createElement('div', { className: 'login-card' },
 React.createElement('h2', { className: 'text-2xl font-bold text-center text-gray-800 mb-2' }, 'Bopstina Ventures'),
 React.createElement('p', { className: 'text-center text-gray-400 text-sm mb-6' }, 'Sign in to your business workspace'),
 authMessage && React.createElement('p', { role: 'alert', className: `text-center text-sm mb-3 ${authMessage.includes('...') ? 'text-amber-600' : 'text-rose-600'}` }, authMessage),
-React.createElement('div', { className: 'text-center text-xs text-gray-500 mb-3' },
-React.createElement('span', null, showSignup ? 'Already have an account?' : 'Need a company account?'),
-React.createElement('button', {
-  type: 'button',
-  onClick: () =>  {
-    setShowSignup(!showSignup);
-    setAuthMessage('');
-  },
-  className: 'ml-1 font-semibold text-amber-600 hover:text-amber-700'
-}, showSignup ? 'Sign in' : 'Create account')
-),
 React.createElement('div', { className: 'space-y-3' },
 showSignup && React.createElement(React.Fragment, null,
 React.createElement('input', { type: 'password', placeholder: 'Approval code from KoraPoint user', required: true, value: signup.accessCode, onChange: e => setSignup(prev => ({ ...prev, accessCode: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
@@ -2563,7 +2555,7 @@ React.createElement('button', {
 onClick: showSignup ? handleSignup : handleLogin,
 disabled: isSubmitting,
 className: 'w-full btn-primary'
-}, isSubmitting ? 'Connecting...' : (showSignup ? 'Create Company Account' : 'Sign In'))
+}, isSubmitting ? 'Connecting...' : 'Sign In')
 )
 ),
 React.createElement('div', { className: 'login-visual' },
