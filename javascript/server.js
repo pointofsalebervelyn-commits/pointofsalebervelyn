@@ -151,7 +151,11 @@ app.post('/api/auth/forgot-password', authLimiter, async (req, res, next) => {
     const genericResponse = { message: 'If an active account exists for that email, a password reset link has been sent.' };
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.json(genericResponse);
     try {
-        const origin = (process.env.CLIENT_ORIGIN || '').split(',')[0].trim();
+        const configuredOrigin = (process.env.CLIENT_ORIGIN || '').split(',')[0].trim();
+        const forwardedHost = req.headers['x-forwarded-host'] || req.headers.host;
+        const forwardedProto = req.headers['x-forwarded-proto'] || 'https';
+        const requestOrigin = forwardedHost ? `${forwardedProto}://${forwardedHost}` : '';
+        const origin = requestOrigin && !/localhost|127\.0\.0\.1/.test(requestOrigin) ? requestOrigin : configuredOrigin;
         await supabaseRequest('/auth/v1/recover', { method: 'POST', body: JSON.stringify({ email, redirect_to: `${origin}/html/` }) });
         res.json(genericResponse);
     } catch (error) { next(error); }
