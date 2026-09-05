@@ -1,28 +1,20 @@
 require('dotenv').config();
 
-const crypto = require('node:crypto');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 const { z } = require('zod');
 
 const app = express();
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const port = Number(process.env.PORT || 3000);
-const jwtSecret = process.env.JWT_SECRET;
-const businessApprovalCode = process.env.BUSINESS_APPROVAL_CODE;
+const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const resendApiKey = process.env.RESEND_API_KEY;
 const reportFromEmail = process.env.REPORT_FROM_EMAIL;
-const allowSignup = process.env.ALLOW_SIGNUP === 'true';
-const jwtIssuer = 'bopstina-ventures-api';
-
-if (!jwtSecret || jwtSecret.length < 32) {
-    throw new Error('JWT_SECRET must be set and at least 32 characters long');
-}
 
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -54,49 +46,55 @@ const refreshLimiter = rateLimit({
     message: { error: 'Too many session refresh attempts. Please try again later.' }
 });
 
-const signupSchema = z.object({
-    accessCode: z.string().min(1).max(100),
-    companyName: z.string().trim().min(2).max(120),
-    businessType: z.enum([
-        'Hardware shop', 'Provision shop', 'Grocery store', 'Clothing and fashion', 'Pharmacy',
-        'Electronics shop', 'Restaurant or food business', 'Beauty and personal care',
-        'Automotive shop', 'Agricultural supplies', 'Other'
-    ]),
-    country: z.string().trim().length(2).default('GH'),
-    name: z.string().trim().min(2).max(120),
-    email: z.string().trim().email().max(254),
-    password: z.string().min(12).max(128)
-});
 const loginSchema = z.object({
     email: z.string().trim().email(),
     password: z.string().min(1).max(128)
 });
 
-function createAccessToken(user) {
-    return jwt.sign({ sub: user.id, tenantId: user.tenant_id }, jwtSecret, {
-        algorithm: 'HS256', expiresIn: '15m', issuer: jwtIssuer, audience: 'bopstina-ventures-web'
+async function supabaseRequest(path, options = {}, accessToken = '') {
+    if (!supabaseUrl || !supabaseAnonKey) throw Object.assign(new Error('Supabase Auth is not configured'), { status: 503 });
+    const response = await fetch(`${supabaseUrl}${path}`, {
+        ...options,
+        headers: {
+            apikey: supabaseAnonKey,
+            'Content-Type': 'application/json',
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+            ...(options.headers || {})
+        }
     });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw Object.assign(new Error(data.msg || data.error_description || data.error || 'Supabase Auth request failed'), { status: response.status });
+    return data;
 }
 
-function hashToken(token) {
-    return crypto.createHash('sha256').update(token).digest('hex');
+async function supabaseAdminRequest(path, options = {}) {
+    if (!supabaseUrl || !supabaseServiceRoleKey) throw Object.assign(new Error('Supabase service role key is not configured'), { status: 503 });
+    const response = await fetch(`${supabaseUrl}${path}`, {
+        ...options,
+        headers: { apikey: supabaseServiceRoleKey, Authorization: `Bearer ${supabaseServiceRoleKey}`, 'Content-Type': 'application/json', ...(options.headers || {}) }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw Object.assign(new Error(data.msg || data.error_description || data.error || 'Supabase Auth admin request failed'), { status: response.status });
+    return data;
 }
 
-async function issueRefreshToken(userId) {
-    const refreshToken = crypto.randomBytes(48).toString('base64url');
-    await pool.query(
-        'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval \'30 days\')',
-        [userId, hashToken(refreshToken)]
+async function getAuthProfile(authUser) {
+    const result = await pool.query(
+        `SELECT u.id, u.tenant_id, u.name, u.email, u.role, t.id AS company_id, t.name AS company_name, t.business_type, t.country, t.currency
+         FROM users u JOIN tenants t ON t.id = u.tenant_id
+         WHERE u.auth_user_id = $1 AND u.is_active = true`,
+        [authUser.id]
     );
-    return refreshToken;
-}
-
-async function authResponse(user) {
-    return {
-        accessToken: createAccessToken(user),
-        refreshToken: await issueRefreshToken(user.id),
-        user
-    };
+    if (!result.rowCount && authUser.email) {
+        const legacy = await pool.query('SELECT id FROM users WHERE email = $1 AND auth_user_id IS NULL AND is_active = true', [authUser.email.toLowerCase()]);
+        if (legacy.rowCount) {
+            await pool.query('UPDATE users SET auth_user_id = $1 WHERE id = $2', [authUser.id, legacy.rows[0].id]);
+            return getAuthProfile(authUser);
+        }
+    }
+    if (!result.rowCount) throw Object.assign(new Error('Your Auth account is not assigned to a business'), { status: 403 });
+    const user = result.rows[0];
+    return { user: { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role }, company: { id: user.company_id, name: user.company_name, business_type: user.business_type, country: user.country, currency: user.currency } };
 }
 
 async function requireAuth(req, res, next) {
@@ -106,13 +104,11 @@ async function requireAuth(req, res, next) {
     if (!token) return res.status(401).json({ error: 'Authentication required' });
 
     try {
-        const claims = jwt.verify(token, jwtSecret, { algorithms: ['HS256'], issuer: jwtIssuer, audience: 'bopstina-ventures-web' });
-        const result = await pool.query(
-            'SELECT id, tenant_id, name, email, role FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true',
-            [claims.sub, claims.tenantId]
-        );
-        if (result.rowCount !== 1) return res.status(401).json({ error: 'Account is unavailable' });
-        req.user = result.rows[0];
+        const authUser = await supabaseRequest('/auth/v1/user', {}, token);
+        const profile = await getAuthProfile(authUser);
+        req.user = profile.user;
+        req.company = profile.company;
+        req.authToken = token;
         next();
     } catch {
         return res.status(401).json({ error: 'Invalid or expired session' });
@@ -135,106 +131,56 @@ app.get('/health', async (_req, res) => {
     }
 });
 
-app.post('/api/auth/signup', authLimiter, async (req, res, next) => {
-    if (!allowSignup) return res.status(404).json({ error: 'Account creation is disabled' });
-    const parsed = signupSchema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ error: 'Please check your signup details and try again.' });
-    if (!businessApprovalCode || parsed.data.accessCode !== businessApprovalCode) {
-        return res.status(403).json({ error: 'A valid approval code is required. Contact the KoraPoint user.' });
-    }
-
-    const data = parsed.data;
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        const passwordHash = await bcrypt.hash(data.password, 12);
-        const tenant = await client.query(
-            'INSERT INTO tenants (name, business_type, country) VALUES ($1, $2, $3) RETURNING id, name, business_type, country, currency',
-            [data.companyName, data.businessType, data.country.toUpperCase()]
-        );
-        const user = await client.query(
-            'INSERT INTO users (tenant_id, name, email, password_hash, role) VALUES ($1, $2, $3, $4, $5) RETURNING id, tenant_id, name, email, role',
-            [tenant.rows[0].id, data.name, data.email.toLowerCase(), passwordHash, 'owner']
-        );
-        await client.query('COMMIT');
-        res.status(201).json({ ...(await authResponse(user.rows[0])), company: tenant.rows[0] });
-    } catch (error) {
-        await client.query('ROLLBACK');
-        if (error.code === '23505') return res.status(409).json({ error: 'An account with that email already exists' });
-        next(error);
-    } finally {
-        client.release();
-    }
-});
-
 app.post('/api/auth/login', authLimiter, async (req, res, next) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Please check your login details and try again.' });
     try {
-        const result = await pool.query(
-            `SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.password_hash,
-                    t.id AS company_id, t.name AS company_name, t.business_type, t.country, t.currency
-             FROM users u JOIN tenants t ON t.id = u.tenant_id
-             WHERE u.email = $1 AND u.is_active = true`,
-            [parsed.data.email.toLowerCase()]
-        );
-        const user = result.rows[0];
-        if (!user || !(await bcrypt.compare(parsed.data.password, user.password_hash))) {
-            return res.status(401).json({ error: 'Invalid email or password' });
-        }
-        const company = { id: user.company_id, name: user.company_name, business_type: user.business_type, country: user.country, currency: user.currency };
-        delete user.password_hash;
-        delete user.company_id;
-        delete user.company_name;
-        delete user.business_type;
-        delete user.country;
-        delete user.currency;
-        res.json({ ...(await authResponse(user)), company });
+        const session = await supabaseRequest('/auth/v1/token?grant_type=password', {
+            method: 'POST', body: JSON.stringify({ email: parsed.data.email.toLowerCase(), password: parsed.data.password })
+        });
+        const profile = await getAuthProfile(session.user);
+        res.json({ accessToken: session.access_token, refreshToken: session.refresh_token, expiresIn: session.expires_in, ...profile });
     } catch (error) {
+        if (error.status === 400) return res.status(401).json({ error: 'Invalid email or password' });
         next(error);
     }
+});
+
+app.post('/api/auth/forgot-password', authLimiter, async (req, res, next) => {
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const genericResponse = { message: 'If an active account exists for that email, a password reset link has been sent.' };
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.json(genericResponse);
+    try {
+        const origin = (process.env.CLIENT_ORIGIN || '').split(',')[0].trim();
+        await supabaseRequest('/auth/v1/recover', { method: 'POST', body: JSON.stringify({ email, redirect_to: `${origin}/html/` }) });
+        res.json(genericResponse);
+    } catch (error) { next(error); }
+});
+
+app.post('/api/auth/reset-password', authLimiter, async (req, res, next) => {
+    const token = typeof req.body?.accessToken === 'string' ? req.body.accessToken : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    if (!token || password.length < 12 || password.length > 128) return res.status(400).json({ error: 'A valid recovery session and a 12-128 character password are required' });
+    try {
+        await supabaseRequest('/auth/v1/user', { method: 'PUT', body: JSON.stringify({ password }) }, token);
+        res.json({ ok: true, message: 'Password reset successfully. You can now sign in.' });
+    } catch (error) { next(error); }
 });
 
 app.post('/api/auth/refresh', refreshLimiter, async (req, res, next) => {
     const token = typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : '';
     if (!token) return res.status(400).json({ error: 'Refresh token is required' });
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        const result = await client.query(
-            `SELECT u.id, u.tenant_id, u.name, u.email, u.role
-             FROM refresh_tokens rt
-             JOIN users u ON u.id = rt.user_id
-             WHERE rt.token_hash = $1 AND rt.revoked_at IS NULL AND rt.expires_at > now() AND u.is_active = true`,
-            [hashToken(token)]
-        );
-        if (result.rowCount !== 1) {
-            await client.query('ROLLBACK');
-            return res.status(401).json({ error: 'Invalid or expired refresh token' });
-        }
-        await client.query('UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1', [hashToken(token)]);
-        const user = result.rows[0];
-        const replacement = crypto.randomBytes(48).toString('base64url');
-        await client.query(
-            'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, now() + interval \'30 days\')',
-            [user.id, hashToken(replacement)]
-        );
-        await client.query('COMMIT');
-        res.json({ accessToken: createAccessToken(user), refreshToken: replacement, user });
+        const session = await supabaseRequest('/auth/v1/token?grant_type=refresh_token', { method: 'POST', body: JSON.stringify({ refresh_token: token }) });
+        const profile = await getAuthProfile(session.user);
+        res.json({ accessToken: session.access_token, refreshToken: session.refresh_token, expiresIn: session.expires_in, ...profile });
     } catch (error) {
-        await client.query('ROLLBACK');
-        next(error);
-    } finally {
-        client.release();
+        res.status(401).json({ error: 'Invalid or expired refresh token' });
     }
 });
 
 app.get('/api/auth/me', requireAuth, async (req, res) => {
-    const company = await pool.query(
-        'SELECT id, name, business_type, country, currency FROM tenants WHERE id = $1',
-        [req.user.tenant_id]
-    );
-    res.json({ user: req.user, company: company.rows[0] });
+    res.json({ user: req.user, company: req.company });
 });
 
 const productSelect = `SELECT id, name, image, category, group_id AS "groupId", product_code AS "productCode", material_type AS "materialType", supplier,
@@ -379,17 +325,31 @@ app.post('/api/suppliers', requireAuth, async (req, res, next) => { try { const 
 app.patch('/api/suppliers/:id', requireAuth, async (req, res, next) => { try { const result = await pool.query('UPDATE suppliers SET name=COALESCE($1,name),contact=COALESCE($2,contact),phone=COALESCE($3,phone) WHERE id=$4 AND tenant_id=$5 RETURNING id,name,contact,phone', [req.body.name, req.body.contact, req.body.phone, req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'Supplier not found' }); res.json({ supplier: result.rows[0] }); } catch (error) { next(error); } });
 app.delete('/api/suppliers/:id', requireAuth, async (req, res, next) => { try { await pool.query('DELETE FROM suppliers WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user.tenant_id]); res.status(204).end(); } catch (error) { next(error); } });
 app.get('/api/users', requireAuth, requireStaffAdmin, async (req, res, next) => { try { const result = await pool.query(`${userSelect} WHERE tenant_id=$1 AND is_active = true ORDER BY created_at`, [req.user.tenant_id]); res.json({ users: result.rows }); } catch (error) { next(error); } });
-app.post('/api/users', requireAuth, requireStaffAdmin, async (req, res, next) => { try { if (!req.body.name?.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(req.body.email || '') || typeof req.body.password !== 'string' || req.body.password.length < 12 || req.body.password.length > 128) return res.status(400).json({ error: 'Name, valid email, and a 12-128 character password are required' }); const passwordHash = await bcrypt.hash(req.body.password, 12); const result = await pool.query('INSERT INTO users (tenant_id,name,email,password_hash,role) VALUES ($1,$2,$3,$4,$5) RETURNING id,name,email,role', [req.user.tenant_id, req.body.name.trim(), req.body.email.toLowerCase(), passwordHash, ['manager', 'cashier'].includes(req.body.role) ? req.body.role : 'cashier']); res.status(201).json({ user: result.rows[0] }); } catch (error) { if (error.code === '23505') return res.status(409).json({ error: 'That email is already in use' }); next(error); } });
+app.post('/api/users', requireAuth, requireStaffAdmin, async (req, res, next) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const role = ['manager', 'cashier'].includes(req.body?.role) ? req.body.role : 'cashier';
+    if (!name || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || password.length < 12 || password.length > 128) return res.status(400).json({ error: 'Name, valid email, and a 12-128 character password are required' });
+    try {
+        const authUser = await supabaseAdminRequest('/auth/v1/admin/users', { method: 'POST', body: JSON.stringify({ email, password, email_confirm: true, user_metadata: { name } }) });
+        try {
+            const result = await pool.query('INSERT INTO users (tenant_id,auth_user_id,name,email,password_hash,role) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,name,email,role', [req.user.tenant_id, authUser.id, name, email, 'supabase-auth-managed', role]);
+            res.status(201).json({ user: result.rows[0] });
+        } catch (error) {
+            await supabaseAdminRequest(`/auth/v1/admin/users/${authUser.id}`, { method: 'DELETE' }).catch(() => {});
+            if (error.code === '23505') return res.status(409).json({ error: 'That email is already in use' });
+            throw error;
+        }
+    } catch (error) { next(error); }
+});
 app.delete('/api/users/:id', requireAuth, requireStaffAdmin, async (req, res, next) => { try { if (req.params.id === req.user.id) return res.status(400).json({ error: 'You cannot revoke yourself' }); const result = await pool.query('UPDATE users SET is_active=false WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'User not found' }); res.status(204).end(); } catch (error) { next(error); } });
 app.patch('/api/auth/password', requireAuth, async (req, res, next) => {
     const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
     const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
     if (newPassword.length < 12 || newPassword.length > 128) return res.status(400).json({ error: 'New password must be between 12 and 128 characters' });
     try {
-        const result = await pool.query('SELECT password_hash FROM users WHERE id=$1 AND tenant_id=$2 AND is_active=true', [req.user.id, req.user.tenant_id]);
-        if (!result.rowCount || !(await bcrypt.compare(currentPassword, result.rows[0].password_hash))) return res.status(401).json({ error: 'Current password is incorrect' });
-        await pool.query('UPDATE users SET password_hash=$1 WHERE id=$2 AND tenant_id=$3', [await bcrypt.hash(newPassword, 12), req.user.id, req.user.tenant_id]);
-        await pool.query('UPDATE refresh_tokens SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL', [req.user.id]);
+        await supabaseRequest('/auth/v1/user', { method: 'PUT', body: JSON.stringify({ password: newPassword }) }, req.authToken);
         await addAudit(pool, req.user.tenant_id, req.user.id, 'Password changed');
         res.json({ ok: true });
     } catch (error) { next(error); }

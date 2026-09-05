@@ -5,17 +5,17 @@ A browser-based point-of-sale app with a multi-tenant API foundation. Each compa
 
 ## Backend foundation
 
-The API uses Node.js, Express, PostgreSQL, bcrypt password hashing, JWT access tokens, and tenant-scoped queries. The schema is in `sql/schema.sql`.
+The API uses Node.js, Express, PostgreSQL, Supabase Auth, and tenant-scoped queries. The schema is in `sql/schema.sql`.
 
 1. Create a PostgreSQL database and enable `pgcrypto` (for UUIDs) and `citext`.
 2. Run `sql/schema.sql` against that database.
-3. Copy `.env.example` to `.env`, set a random `JWT_SECRET` of at least 32 characters, and set a private `BUSINESS_APPROVAL_CODE`.
+3. Copy `.env.example` to `.env`, set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and the server-only `SUPABASE_SERVICE_ROLE_KEY`.
 4. Install dependencies with `npm install`.
 5. Start the API with `npm start`.
 
 For Windows, after PostgreSQL is installed and its `psql` command is on PATH, run `./powershell/start-api.ps1` to create a local `.env`, apply `sql/schema.sql`, and start the API automatically.
 
-The API provides company onboarding and sessions (`POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/auth/refresh`, `GET /api/auth/me`), tenant bootstrap (`GET /api/bootstrap`), products and stock, atomic sales/refunds/purchases, suppliers, expenses, customers, staff accounts, and register operations. Refresh tokens are stored hashed and rotated on use.
+The API uses Supabase Auth for login, refresh tokens, password recovery, and password changes. The public `users` table stores tenant membership and roles, linked through `auth_user_id`. It also provides tenant bootstrap (`GET /api/bootstrap`), products and stock, atomic sales/refunds/purchases, suppliers, expenses, customers, staff accounts, and register operations.
 
 The POS screens now authenticate against the API and route products, stock, checkout, refunds, purchases, register actions, suppliers, expenses, and staff management through tenant-scoped endpoints. localStorage remains only as a temporary UI cache and backup mechanism.
 
@@ -41,14 +41,22 @@ Vercel hosts both the frontend and the Node.js API. The API entry point is `api/
 
 1. Push this repository to GitHub.
 2. Import the repository into Vercel and keep the project root at the repository root.
-3. In Supabase, create a project and copy its Node/Postgres connection string from **Project Settings > Database > Connect**. Prefer the pooler connection string for serverless workloads. Add it to Vercel as `DATABASE_URL`, along with `JWT_SECRET` (at least 32 characters), `BUSINESS_APPROVAL_CODE`, and `ALLOW_SIGNUP=false` for the Production environment.
-4. Optionally add `RESEND_API_KEY` and `REPORT_FROM_EMAIL` for emailed reports.
+3. In Supabase, copy the project URL and publishable/anon key from **Project Settings > API**. Copy the service-role key into Vercel only as `SUPABASE_SERVICE_ROLE_KEY`; never expose it to the browser. Add `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` to Vercel.
+4. In Supabase Auth, create the owner and staff Auth users. For each existing `public.users` row, link the matching Auth UUID once:
+
+```sql
+UPDATE public.users
+SET auth_user_id = 'SUPABASE_AUTH_USER_UUID'
+WHERE email = 'person@example.com';
+```
+
+5. Add the database connection string as `DATABASE_URL` and set `CLIENT_ORIGIN` to the deployed app URL. Add the deployed URL to **Supabase Auth > URL Configuration > Redirect URLs**.
 5. Open the Supabase **SQL Editor**, paste and run `sql/schema.sql` once. Do not expose the Supabase service-role key in frontend code; this app connects through the server-side `DATABASE_URL` only.
 6. Deploy. The frontend uses the deployed Vercel URL as its API URL automatically; local development continues to use `http://localhost:3000`.
 
 Never commit `.env`, database passwords, or JWT secrets.
 
-Authentication is handled by the server API with bcrypt password hashes, short-lived signed access tokens, rotated refresh tokens, rate-limited login attempts, tenant-scoped queries, and password-change session revocation. Supabase stores the PostgreSQL data; the Supabase service-role key is not used in the browser. Keep `ALLOW_SIGNUP=false` after the initial owner account is created.
+Authentication is handled by Supabase Auth, while the server enforces tenant roles from `public.users`. The service-role key is server-only. Password recovery is delivered by Supabase Auth email templates and redirects back to the app.
 
 ## Updating the app
 

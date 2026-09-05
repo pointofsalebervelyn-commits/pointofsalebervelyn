@@ -15,104 +15,6 @@ const DB = {
 
 const API_BASE = window.NEXATILL_API_URL || 'http://localhost:3000';
 const SESSION_KEY = 'nexatill_session';
-const LOCAL_USERS_KEY = 'nexatill_local_users';
-const LOCAL_APPROVAL_CODE = 'BERVELYN@123';
-
-async function hashValue(value) {
-    const bytes = new TextEncoder().encode(String(value));
-    const hash = await crypto.subtle.digest('SHA-256', bytes);
-    return Array.from(new Uint8Array(hash)).map(byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
-function getLocalUsers() {
-    try {
-        const raw = localStorage.getItem(LOCAL_USERS_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-}
-
-function saveLocalUsers(users) {
-    localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
-}
-
-async function attemptLocalAuth(path, credentials) {
-    const users = getLocalUsers();
-    if (path === '/api/auth/signup') {
-        const accessCode = String(credentials?.accessCode || '').trim();
-        const companyName = String(credentials?.companyName || '').trim();
-        const businessType = String(credentials?.businessType || '').trim();
-        const name = String(credentials?.name || '').trim();
-        const email = String(credentials?.email || '').trim().toLowerCase();
-        const password = String(credentials?.password || '');
-
-        if (!accessCode || accessCode !== LOCAL_APPROVAL_CODE) {
-            throw new Error('A valid approval code is required.');
-        }
-        if (!companyName || !businessType || !name || !email || password.length < 12) {
-            throw new Error('Complete all company and owner fields.');
-        }
-
-        const existing = users.find(user => user.email === email);
-        if (existing) {
-            throw new Error('An account with that email already exists');
-        }
-
-        const user = {
-            id: 'local-user-' + Date.now(),
-            tenant_id: 'local-tenant-' + Date.now(),
-            name,
-            email,
-            role: 'owner',
-            password_hash: await hashValue(password),
-            is_active: true,
-            created_at: new Date().toISOString(),
-            company: {
-                id: 'local-tenant-' + Date.now(),
-                name: companyName,
-                business_type: businessType,
-                country: 'GH',
-                currency: 'GHS'
-            }
-        };
-
-        const nextUsers = [...users, user];
-        saveLocalUsers(nextUsers);
-
-        return {
-            accessToken: 'local-demo-token',
-            refreshToken: 'local-demo-refresh',
-            user: { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role },
-            company: user.company
-        };
-    }
-
-    if (path === '/api/auth/login') {
-        const email = String(credentials?.email || '').trim().toLowerCase();
-        const password = String(credentials?.password || '');
-        const user = users.find(candidate => candidate.email === email && candidate.is_active !== false);
-        if (!user) {
-            throw new Error('Invalid email or password');
-        }
-
-        const passwordHash = await hashValue(password);
-        if (user.password_hash !== passwordHash) {
-            throw new Error('Invalid email or password');
-        }
-
-        return {
-            accessToken: 'local-demo-token',
-            refreshToken: 'local-demo-refresh',
-            user: { id: user.id, tenant_id: user.tenant_id, name: user.name, email: user.email, role: user.role },
-            company: user.company || { id: user.tenant_id, name: 'Local Business', business_type: 'Other', country: 'GH', currency: 'GHS' }
-        };
-    }
-
-    return null;
-}
 
 async function apiRequest(path, options = {}, token = '') {
     const controller = new AbortController();
@@ -131,7 +33,7 @@ async function apiRequest(path, options = {}, token = '') {
         clearTimeout(timeout);
     }
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'Request failed');
+    if (!response.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: response.status });
     return data;
 }
 
@@ -358,27 +260,21 @@ function AppProvider({ children }) {
     };
 
     const authenticate = async (path, credentials) => {
-        let session;
         try {
-            session = await attemptLocalAuth(path, credentials);
-            if (!session) {
-                session = await apiRequest(path, { method: 'POST', body: JSON.stringify(credentials) });
-            }
+            const session = await apiRequest(path, { method: 'POST', body: JSON.stringify(credentials) });
+            DB.set(SESSION_KEY, session);
+            setCurrentUser(session.user);
+            setCurrentCompany(session.company || null);
+            clearLocalTenantData();
+            setUsers([session.user]);
+            await refreshTenantData();
+            return session;
         } catch (error) {
             if (error instanceof TypeError || error.message === 'Failed to fetch' || error.message.includes('too long')) {
                 throw new Error('Unable to complete your request right now. Please try again.');
             }
             throw error;
         }
-        DB.set(SESSION_KEY, session);
-        setCurrentUser(session.user);
-        setCurrentCompany(session.company || null);
-        clearLocalTenantData();
-        setUsers([session.user]);
-        try {
-            await refreshTenantData();
-        } catch { /* Empty inventory is valid for a new company. */ }
-        return session;
     };
 
     const logout = () => {
@@ -394,7 +290,18 @@ function AppProvider({ children }) {
         clearLocalTenantData();
         apiRequest('/api/bootstrap', {}, savedSession.accessToken)
             .then(data => { setProducts(data.products || []); setGroups(data.groups || []); setQuickSellItems(data.quickSellItems || []); setSales(data.sales || []); setCustomers(data.customers || []); setSuppliers(data.suppliers || []); setExpenses(data.expenses || []); setUsers(data.users || [savedSession.user]); setRegister(data.register || { isOpen: false, openingCash: 0, openedAt: null }); setStockMovements(data.stockMovements || []); setPurchases(data.purchases || []); setAuditLogs(data.auditLogs || []); })
-            .catch(() => { logout(); showToast('Session expired. Please sign in again.', 'error'); });
+            .catch(async error => {
+                if (error.status === 401 && savedSession.refreshToken) {
+                    try {
+                        const session = await apiRequest('/api/auth/refresh', { method: 'POST', body: JSON.stringify({ refreshToken: savedSession.refreshToken }) });
+                        DB.set(SESSION_KEY, session);
+                        setCurrentUser(session.user);
+                        setCurrentCompany(session.company || null);
+                        const data = await apiRequest('/api/bootstrap', {}, session.accessToken);
+                        setProducts(data.products || []); setGroups(data.groups || []); setQuickSellItems(data.quickSellItems || []); setSales(data.sales || []); setCustomers(data.customers || []); setSuppliers(data.suppliers || []); setExpenses(data.expenses || []); setUsers(data.users || [session.user]); setRegister(data.register || { isOpen: false, openingCash: 0, openedAt: null }); setStockMovements(data.stockMovements || []); setPurchases(data.purchases || []); setAuditLogs(data.auditLogs || []);
+                    } catch { logout(); showToast('Session expired. Please sign in again.', 'error'); }
+                } else { logout(); showToast('Session expired. Please sign in again.', 'error'); }
+            });
     }, []);
 
     // Persist
@@ -2348,8 +2255,11 @@ const [showAdd, setShowAdd] = useState(false);
 const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cashier' });
 const [showStaffPassword, setShowStaffPassword] = useState(false);
 const [loginUser, setLoginUser] = useState({ email: '', password: '' });
-const [signup, setSignup] = useState({ accessCode: '', companyName: '', businessType: '', name: '', email: '', password: '' });
-const showSignup = false;
+const recoveryParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+const recoveryAccessToken = recoveryParams.get('access_token') || '';
+const [authMode, setAuthMode] = useState(() => recoveryAccessToken ? 'reset' : 'login');
+const [forgotEmail, setForgotEmail] = useState('');
+const [resetForm, setResetForm] = useState({ password: '', confirmPassword: '' });
 const [isSubmitting, setIsSubmitting] = useState(false);
 const [authMessage, setAuthMessage] = useState('');
 const [showAuthPassword, setShowAuthPassword] = useState(false);
@@ -2381,41 +2291,35 @@ setIsSubmitting(false);
 }
 };
 
+const handleForgotPassword = async () => {
+if (isSubmitting) return;
+if (!isValidEmail(forgotEmail)) { setAuthMessage('Enter a valid email address.'); return; }
+try {
+setIsSubmitting(true);
+setAuthMessage('Sending reset instructions...');
+const response = await apiRequest('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email: forgotEmail }) });
+setAuthMessage(response.message);
+} catch (error) { setAuthMessage(error.message); } finally { setIsSubmitting(false); }
+};
+
+const handleResetPassword = async () => {
+if (isSubmitting) return;
+if (!recoveryAccessToken) { setAuthMessage('This password reset link is invalid or expired.'); return; }
+if (resetForm.password.length < 12 || resetForm.password.length > 128) { setAuthMessage('Password must be 12-128 characters.'); return; }
+if (resetForm.password !== resetForm.confirmPassword) { setAuthMessage('Passwords do not match.'); return; }
+try {
+setIsSubmitting(true);
+const response = await apiRequest('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ accessToken: recoveryAccessToken, password: resetForm.password }) });
+setAuthMessage(response.message);
+setAuthMode('login');
+window.history.replaceState({}, document.title, window.location.pathname);
+} catch (error) { setAuthMessage(error.message); } finally { setIsSubmitting(false); }
+};
+
 const handleLogout = () => {
 logout();
 setIsLogin(true);
 showToast('Logged out', 'info');
-};
-
-const handleSignup = async () => {
-if (isSubmitting) return;
-if (!signup.accessCode.trim() || !signup.companyName.trim() || !signup.businessType.trim() || !signup.name.trim() || !signup.email.trim() || !signup.password) {
-setAuthMessage('Complete all company and owner fields.');
-showToast('Complete all company and owner fields', 'error');
-return;
-}
-if (signup.password.length < 12) {
-setAuthMessage('Password must be at least 12 characters.');
-showToast('Password must be at least 12 characters', 'error');
-return;
-}
-if (!isValidEmail(signup.email)) {
-setAuthMessage('Enter a valid email address.');
-showToast('Enter a valid email address', 'error');
-return;
-}
-try {
-setIsSubmitting(true);
-setAuthMessage('Creating your company account...');
-const session = await authenticate('/api/auth/signup', signup);
-setIsLogin(false);
-showToast('Company created. Welcome, ' + session.user.name);
-} catch (error) {
-setAuthMessage(error.message);
-showToast(error.message, 'error');
-} finally {
-setIsSubmitting(false);
-}
 };
 
 const handleChangePassword = async () => {
@@ -2503,60 +2407,27 @@ React.createElement('h2', { className: 'text-2xl font-bold text-center text-gray
 React.createElement('p', { className: 'text-center text-gray-400 text-sm mb-6' }, 'Sign in to your business workspace'),
 authMessage && React.createElement('p', { role: 'alert', className: `text-center text-sm mb-3 ${authMessage.includes('...') ? 'text-amber-600' : 'text-rose-600'}` }, authMessage),
 React.createElement('div', { className: 'space-y-3' },
-showSignup && React.createElement(React.Fragment, null,
-React.createElement('input', { type: 'password', placeholder: 'Approval code from KoraPoint user', required: true, value: signup.accessCode, onChange: e => setSignup(prev => ({ ...prev, accessCode: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
-React.createElement('input', { type: 'text', placeholder: 'Company name', required: true, value: signup.companyName, onChange: e => setSignup(prev => ({ ...prev, companyName: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
-React.createElement('select', { value: signup.businessType, required: true, onChange: e => setSignup(prev => ({ ...prev, businessType: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' },
-React.createElement('option', { value: '' }, 'Select business type *'),
-React.createElement('option', { value: 'Hardware shop' }, 'Hardware shop'),
-React.createElement('option', { value: 'Provision shop' }, 'Provision shop'),
-React.createElement('option', { value: 'Grocery store' }, 'Grocery store'),
-React.createElement('option', { value: 'Clothing and fashion' }, 'Clothing and fashion'),
-React.createElement('option', { value: 'Pharmacy' }, 'Pharmacy'),
-React.createElement('option', { value: 'Electronics shop' }, 'Electronics shop'),
-React.createElement('option', { value: 'Restaurant or food business' }, 'Restaurant or food business'),
-React.createElement('option', { value: 'Beauty and personal care' }, 'Beauty and personal care'),
-React.createElement('option', { value: 'Automotive shop' }, 'Automotive shop'),
-React.createElement('option', { value: 'Agricultural supplies' }, 'Agricultural supplies'),
-React.createElement('option', { value: 'Other' }, 'Other')
-),
-React.createElement('input', { type: 'text', placeholder: 'Your name', required: true, value: signup.name, onChange: e => setSignup(prev => ({ ...prev, name: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' })
-),
-React.createElement('input', {
-type: 'email',
-placeholder: 'Email address',
-autoComplete: showSignup ? 'email' : 'username',
-required: true,
-ariaInvalid: showSignup && signup.email.length > 0 && !isValidEmail(signup.email),
-value: showSignup ? signup.email : loginUser.email,
-onChange: (e) => showSignup ? setSignup(prev => ({ ...prev, email: e.target.value })) : setLoginUser(prev => ({ ...prev, email: e.target.value })),
-className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm'
-}),
-showSignup && signup.email.length > 0 && !isValidEmail(signup.email) && React.createElement('p', { className: 'text-xs text-rose-600 -mt-2' }, 'Enter a valid email address, for example name@company.com.'),
+authMode === 'login' && React.createElement(React.Fragment, null,
+React.createElement('input', { type: 'email', placeholder: 'Email address', autoComplete: 'username', required: true, value: loginUser.email, onChange: e => setLoginUser(prev => ({ ...prev, email: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
 React.createElement('div', { className: 'relative' },
-React.createElement('input', {
-type: showAuthPassword ? 'text' : 'password',
-placeholder: showSignup ? 'Password (12+ characters)' : 'Password',
-autoComplete: showSignup ? 'new-password' : 'current-password',
-required: true,
-value: showSignup ? signup.password : loginUser.password,
-onChange: (e) => showSignup ? setSignup(prev => ({ ...prev, password: e.target.value })) : setLoginUser(prev => ({ ...prev, password: e.target.value })),
-className: 'w-full px-3 py-2 pr-20 border border-gray-200 rounded-lg text-sm',
-onKeyDown: (e) => e.key === 'Enter' && (showSignup ? handleSignup() : handleLogin())
-}),
-React.createElement('button', {
-type: 'button',
-onClick: () => setShowAuthPassword(!showAuthPassword),
-className: 'absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-gray-500 hover:text-amber-600',
-ariaLabel: showAuthPassword ? 'Hide password' : 'Show password'
-}, showAuthPassword ? 'Hide' : 'Show')
+React.createElement('input', { type: showAuthPassword ? 'text' : 'password', placeholder: 'Password', autoComplete: 'current-password', required: true, value: loginUser.password, onChange: e => setLoginUser(prev => ({ ...prev, password: e.target.value })), className: 'w-full px-3 py-2 pr-20 border border-gray-200 rounded-lg text-sm', onKeyDown: e => e.key === 'Enter' && handleLogin() }),
+React.createElement('button', { type: 'button', onClick: () => setShowAuthPassword(!showAuthPassword), className: 'absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 text-xs text-gray-500 hover:text-amber-600' }, showAuthPassword ? 'Hide' : 'Show')
 ),
-React.createElement('button', {
-onClick: showSignup ? handleSignup : handleLogin,
-disabled: isSubmitting,
-className: 'w-full btn-primary'
-}, isSubmitting ? 'Connecting...' : 'Sign In')
+React.createElement('button', { onClick: handleLogin, disabled: isSubmitting, className: 'w-full btn-primary' }, isSubmitting ? 'Connecting...' : 'Sign In'),
+React.createElement('button', { type: 'button', onClick: () => { setAuthMode('forgot'); setAuthMessage(''); }, className: 'w-full text-sm text-amber-600 hover:text-amber-700' }, 'Forgot password?')
+),
+authMode === 'forgot' && React.createElement(React.Fragment, null,
+React.createElement('input', { type: 'email', placeholder: 'Account email address', autoComplete: 'email', value: forgotEmail, onChange: e => setForgotEmail(e.target.value), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
+React.createElement('button', { onClick: handleForgotPassword, disabled: isSubmitting, className: 'w-full btn-primary' }, isSubmitting ? 'Sending...' : 'Send Reset Link'),
+React.createElement('button', { type: 'button', onClick: () => { setAuthMode('login'); setAuthMessage(''); }, className: 'w-full text-sm text-gray-500 hover:text-gray-700' }, 'Back to sign in')
+),
+authMode === 'reset' && React.createElement(React.Fragment, null,
+React.createElement('input', { type: 'password', placeholder: 'New password (12-128 characters)', value: resetForm.password, onChange: e => setResetForm(prev => ({ ...prev, password: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
+React.createElement('input', { type: 'password', placeholder: 'Confirm new password', value: resetForm.confirmPassword, onChange: e => setResetForm(prev => ({ ...prev, confirmPassword: e.target.value })), className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
+React.createElement('button', { onClick: handleResetPassword, disabled: isSubmitting, className: 'w-full btn-primary' }, isSubmitting ? 'Saving...' : 'Set New Password'),
+React.createElement('button', { type: 'button', onClick: () => { setAuthMode('login'); setAuthMessage(''); }, className: 'w-full text-sm text-gray-500 hover:text-gray-700' }, 'Back to sign in')
 )
+),
 ),
 React.createElement('div', { className: 'login-visual' },
 React.createElement('div', { className: 'login-visual-copy' },
