@@ -280,9 +280,30 @@ app.delete('/api/products/:id', requireAuth, async (req, res, next) => {
 });
 
 app.post('/api/products/:id/stock-adjustments', requireAuth, async (req, res, next) => {
-    const amount = Number(req.body?.quantity); if (!Number.isFinite(amount) || amount === 0) return res.status(400).json({ error: 'A non-zero quantity is required' });
+    const amount = Number(req.body?.quantity);
+    if (!Number.isFinite(amount) || amount === 0) return res.status(400).json({ error: 'A non-zero quantity is required' });
     const client = await pool.connect();
-    try { await client.query('BEGIN'); const product = await client.query('UPDATE products SET quantity=GREATEST(0, quantity + $1) WHERE id=$2 AND tenant_id=$3 RETURNING id', [amount, req.params.id, req.user.tenant_id]); if (!product.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Product not found' }); } await client.query('INSERT INTO stock_movements (tenant_id, product_id, quantity, reason) VALUES ($1,$2,$3,$4)', [req.user.tenant_id, req.params.id, amount, req.body.reason || 'Manual adjustment']); await addAudit(client, req.user.tenant_id, req.user.id, 'Stock adjusted', `${req.params.id}: ${amount}`); await client.query('COMMIT'); res.status(201).json({ ok: true }); } catch (error) { await client.query('ROLLBACK'); next(error); } finally { client.release(); }
+    try {
+        await client.query('BEGIN');
+        const product = await client.query(
+            'UPDATE products SET quantity=GREATEST(0, quantity + $1), updated_at=now() WHERE id=$2 AND tenant_id=$3 AND is_active=true RETURNING id, quantity, buying_price AS "buyingPrice", selling_price AS "sellingPrice", updated_at AS "updatedAt"',
+            [amount, req.params.id, req.user.tenant_id]
+        );
+        if (!product.rowCount) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Product not found' });
+        }
+        const movement = await client.query(
+            'INSERT INTO stock_movements (tenant_id, product_id, quantity, reason) VALUES ($1,$2,$3,$4) RETURNING id, product_id AS "productId", quantity, reason, created_at AS date',
+            [req.user.tenant_id, req.params.id, amount, req.body.reason || 'Manual adjustment']
+        );
+        await addAudit(client, req.user.tenant_id, req.user.id, 'Stock adjusted', `${req.params.id}: ${amount}`);
+        await client.query('COMMIT');
+        res.status(201).json({ ok: true, product: product.rows[0], movement: movement.rows[0] });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        next(error);
+    } finally { client.release(); }
 });
 
 app.post('/api/sales', requireAuth, async (req, res, next) => {
@@ -290,20 +311,73 @@ app.post('/api/sales', requireAuth, async (req, res, next) => {
     if (!Array.isArray(sale.items) || !sale.items.length || sale.items.some(item => !item.productId || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0)) {
         return res.status(400).json({ error: 'Valid sale items are required' });
     }
+
+    // Consolidate duplicate product lines before touching stock. This keeps stock math correct
+    // and reduces the number of database round trips during checkout.
+    const quantities = new Map();
+    for (const item of sale.items) {
+        quantities.set(item.productId, (quantities.get(item.productId) || 0) + Number(item.quantity));
+    }
+    const requested = [...quantities.entries()];
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        for (const item of sale.items) {
-            const stock = await client.query('UPDATE products SET quantity=quantity-$1 WHERE id=$2 AND tenant_id=$3 AND quantity >= $1 RETURNING id', [Number(item.quantity), item.productId, req.user.tenant_id]);
-            if (!stock.rowCount) throw Object.assign(new Error('Insufficient stock'), { status: 409 });
-            await client.query('INSERT INTO stock_movements (tenant_id, product_id, quantity, reason) VALUES ($1,$2,$3,$4)', [req.user.tenant_id, item.productId, -Number(item.quantity), 'Sale']);
+
+        // One atomic UPDATE handles all stock deductions. PostgreSQL evaluates the stock
+        // condition against the current row, preventing overselling under concurrent checkouts.
+        const values = [];
+        const placeholders = requested.map(([productId, quantity], index) => {
+            const base = index * 2;
+            values.push(productId, quantity);
+            return `($${base + 1}::uuid, $${base + 2}::numeric)`;
+        }).join(',');
+        const stock = await client.query(`
+            WITH requested(product_id, quantity) AS (VALUES ${placeholders}),
+            updated AS (
+                UPDATE products p
+                SET quantity = p.quantity - r.quantity, updated_at = now()
+                FROM requested r
+                WHERE p.id = r.product_id
+                  AND p.tenant_id = $${values.length + 1}
+                  AND p.is_active = true
+                  AND p.quantity >= r.quantity
+                RETURNING p.id, p.quantity
+            )
+            SELECT r.product_id, r.quantity AS sold_quantity, u.quantity AS remaining_quantity
+            FROM requested r
+            LEFT JOIN updated u ON u.id = r.product_id
+        `, [...values, req.user.tenant_id]);
+
+        if (stock.rows.length !== requested.length || stock.rows.some(row => row.remaining_quantity === null)) {
+            throw Object.assign(new Error('Insufficient stock or one or more products are no longer available'), { status: 409 });
         }
+
+        // One insert records all stock movements generated by this sale.
+        // Record all stock movements in one insert to keep checkout fast.
+        const movementParams = [];
+        const movementRows = requested.map(([productId, quantity], index) => {
+            const base = index * 3;
+            movementParams.push(req.user.tenant_id, productId, quantity);
+            return `($${base + 1}, $${base + 2}, -$${base + 3}::numeric, 'Sale')`;
+        }).join(',');
+        await client.query(
+            `INSERT INTO stock_movements (tenant_id, product_id, quantity, reason) VALUES ${movementRows}`,
+            movementParams
+        );
+
         const inserted = await client.query(`INSERT INTO sales (tenant_id, customer_name, customer_phone, payment_method, items, total, profit, cash_received, change_amount, created_by)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, created_at AS date`, [req.user.tenant_id, sale.customerName || 'Walk-in Customer', sale.customerPhone || '', sale.paymentMethod || 'Cash', JSON.stringify(sale.items), Number(sale.total) || 0, Number(sale.profit) || 0, Number(sale.cashReceived) || 0, Number(sale.change) || 0, req.user.id]);
         if (sale.customerName && sale.customerName !== 'Walk-in Customer') await client.query(`INSERT INTO customers (tenant_id,name,phone,last_purchase,total_spent,purchase_count) VALUES ($1,$2,$3,now(),$4,1) ON CONFLICT (tenant_id,name) DO UPDATE SET phone=EXCLUDED.phone,last_purchase=now(),total_spent=customers.total_spent+EXCLUDED.total_spent,purchase_count=customers.purchase_count+1`, [req.user.tenant_id, sale.customerName, sale.customerPhone || '', Number(sale.total) || 0]);
         await addAudit(client, req.user.tenant_id, req.user.id, 'Sale completed', inserted.rows[0].id);
-        await client.query('COMMIT'); res.status(201).json({ sale: { ...sale, id: inserted.rows[0].id, date: inserted.rows[0].date } });
-    } catch (error) { await client.query('ROLLBACK'); next(error.status ? Object.assign(error, { status: error.status }) : error); } finally { client.release(); }
+        await client.query('COMMIT');
+        res.status(201).json({
+            sale: { ...sale, id: inserted.rows[0].id, date: inserted.rows[0].date },
+            stock: stock.rows.map(row => ({ productId: row.product_id, quantity: row.remaining_quantity }))
+        });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        next(error.status ? Object.assign(error, { status: error.status }) : error);
+    } finally { client.release(); }
 });
 
 app.post('/api/sales/:id/refund', requireAuth, async (req, res, next) => {
@@ -317,9 +391,24 @@ app.post('/api/sales/:id/refund', requireAuth, async (req, res, next) => {
 });
 
 app.post('/api/purchases', requireAuth, async (req, res, next) => {
-    const data = req.body || {}; const quantity = Number(data.quantity); const unitCost = Number(data.unitCost); if (!data.productId || quantity <= 0 || unitCost < 0) return res.status(400).json({ error: 'Valid product, quantity, and cost are required' });
+    const data = req.body || {};
+    const quantity = Number(data.quantity);
+    const unitCost = Number(data.unitCost);
+    if (!data.productId || quantity <= 0 || unitCost < 0) return res.status(400).json({ error: 'Valid product, quantity, and cost are required' });
     const client = await pool.connect();
-    try { await client.query('BEGIN'); const product = await client.query('UPDATE products SET quantity=quantity+$1,buying_price=$2,supplier=COALESCE($3,supplier) WHERE id=$4 AND tenant_id=$5 RETURNING id', [quantity, unitCost, data.supplier || null, data.productId, req.user.tenant_id]); if (!product.rowCount) throw Object.assign(new Error('Product not found'), { status: 404 }); const purchase = await client.query('INSERT INTO purchases (tenant_id,product_id,supplier,quantity,unit_cost) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at AS date', [req.user.tenant_id, data.productId, data.supplier || '', quantity, unitCost]); await client.query('INSERT INTO stock_movements (tenant_id,product_id,quantity,reason) VALUES ($1,$2,$3,$4)', [req.user.tenant_id, data.productId, quantity, 'Purchase']); await addAudit(client, req.user.tenant_id, req.user.id, 'Purchase recorded', `${data.productId}: ${quantity}`); await client.query('COMMIT'); res.status(201).json({ purchase: { ...data, id: purchase.rows[0].id, date: purchase.rows[0].date } }); } catch (error) { await client.query('ROLLBACK'); next(error); } finally { client.release(); }
+    try {
+        await client.query('BEGIN');
+        const product = await client.query(
+            'UPDATE products SET quantity=quantity+$1,buying_price=$2,supplier=COALESCE($3,supplier),updated_at=now() WHERE id=$4 AND tenant_id=$5 AND is_active=true RETURNING id,quantity,buying_price AS "buyingPrice",supplier,updated_at AS "updatedAt"',
+            [quantity, unitCost, data.supplier || null, data.productId, req.user.tenant_id]
+        );
+        if (!product.rowCount) throw Object.assign(new Error('Product not found'), { status: 404 });
+        const purchase = await client.query('INSERT INTO purchases (tenant_id,product_id,supplier,quantity,unit_cost) VALUES ($1,$2,$3,$4,$5) RETURNING id,created_at AS date', [req.user.tenant_id, data.productId, data.supplier || '', quantity, unitCost]);
+        const movement = await client.query('INSERT INTO stock_movements (tenant_id,product_id,quantity,reason) VALUES ($1,$2,$3,$4) RETURNING id,product_id AS "productId",quantity,reason,created_at AS date', [req.user.tenant_id, data.productId, quantity, 'Purchase']);
+        await addAudit(client, req.user.tenant_id, req.user.id, 'Purchase recorded', `${data.productId}: ${quantity}`);
+        await client.query('COMMIT');
+        res.status(201).json({ purchase: { ...data, id: purchase.rows[0].id, date: purchase.rows[0].date }, product: product.rows[0], movement: movement.rows[0] });
+    } catch (error) { await client.query('ROLLBACK'); next(error); } finally { client.release(); }
 });
 
 app.get('/api/customers', requireAuth, async (req, res, next) => { try { const result = await pool.query(`SELECT id,name,phone,last_purchase AS "lastPurchase",total_spent AS "totalSpent",purchase_count AS "purchaseCount" FROM customers WHERE tenant_id=$1 ORDER BY name`, [req.user.tenant_id]); res.json({ customers: result.rows }); } catch (error) { next(error); } });

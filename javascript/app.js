@@ -336,7 +336,7 @@ function AppProvider({ children }) {
 
     const addProduct = (p) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { return apiRequest('/api/products', { method: 'POST', body: JSON.stringify(p) }, token).then(() => refreshTenantData()).then(() => { showToast('Product added successfully!'); }); }
+        if (token) { return apiRequest('/api/products', { method: 'POST', body: JSON.stringify(p) }, token).then(data => { setProducts(prev => [data.product, ...prev]); showToast('Product added successfully!'); }); }
         setProducts(prev => [...prev, { ...p, id: 'p' + Date.now(), dateAdded: new Date().toISOString() }]);
         logAction('Product added', p.name);
         showToast('Product added successfully!');
@@ -345,7 +345,7 @@ function AppProvider({ children }) {
 
     const updateProduct = (id, data) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { return apiRequest(`/api/products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }, token).then(() => refreshTenantData()).then(() => { showToast('Product updated!'); }); }
+        if (token) { return apiRequest(`/api/products/${id}`, { method: 'PATCH', body: JSON.stringify(data) }, token).then(result => { setProducts(prev => prev.map(product => product.id === id ? result.product : product)); showToast('Product updated!'); }); }
         setProducts(prev => prev.map(p => p.id === id ? { ...p, ...data } : p));
         logAction('Product updated', id);
         showToast('Product updated!');
@@ -354,7 +354,7 @@ function AppProvider({ children }) {
 
     const deleteProduct = (id) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { return apiRequest(`/api/products/${id}`, { method: 'DELETE' }, token).then(() => refreshTenantData()).then(() => { showToast('Product archived.', 'info'); }); }
+        if (token) { return apiRequest(`/api/products/${id}`, { method: 'DELETE' }, token).then(() => { setProducts(prev => prev.filter(product => product.id !== id)); showToast('Product archived.', 'info'); }); }
         setProducts(prev => prev.filter(p => p.id !== id));
         logAction('Product deleted', id);
         showToast('Product archived.', 'info');
@@ -365,7 +365,21 @@ function AppProvider({ children }) {
         const amount = Number(quantity);
         if (!Number.isFinite(amount) || amount === 0) return;
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { apiRequest(`/api/products/${productId}/stock-adjustments`, { method: 'POST', body: JSON.stringify({ quantity: amount, reason }) }, token).then(() => refreshTenantData()).then(() => showToast('Stock updated')).catch(error => showToast(error.message, 'error')); return; }
+        if (token) {
+            return apiRequest(`/api/products/${productId}/stock-adjustments`, {
+                method: 'POST',
+                body: JSON.stringify({ quantity: amount, reason })
+            }, token).then(data => {
+                // Update only the affected product instead of reloading the entire tenant.
+                if (data.product) {
+                    setProducts(prev => prev.map(product => product.id === productId
+                        ? { ...product, ...data.product }
+                        : product));
+                }
+                if (data.movement) setStockMovements(prev => [...prev, data.movement]);
+                showToast('Stock updated');
+            }).catch(error => showToast(error.message, 'error'));
+        }
         setProducts(prev => prev.map(product => product.id === productId ? {
             ...product,
             quantity: Math.max(0, product.quantity + amount)
@@ -433,7 +447,22 @@ function AppProvider({ children }) {
 
     const recordPurchase = (purchase) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { apiRequest('/api/purchases', { method: 'POST', body: JSON.stringify(purchase) }, token).then(() => refreshTenantData()).then(() => showToast('Purchase recorded and stock updated')).catch(error => showToast(error.message, 'error')); return; }
+        if (token) {
+            return apiRequest('/api/purchases', {
+                method: 'POST',
+                body: JSON.stringify(purchase)
+            }, token).then(data => {
+                // Apply the server's authoritative values locally without a full bootstrap refresh.
+                if (data.product) {
+                    setProducts(prev => prev.map(product => product.id === purchase.productId
+                        ? { ...product, ...data.product }
+                        : product));
+                }
+                if (data.purchase) setPurchases(prev => [...prev, data.purchase]);
+                if (data.movement) setStockMovements(prev => [...prev, data.movement]);
+                showToast('Purchase recorded and stock updated');
+            }).catch(error => showToast(error.message, 'error'));
+        }
         const updatedProducts = products.map(product => product.id === purchase.productId ? {
             ...product,
             quantity: product.quantity + purchase.quantity,
@@ -453,14 +482,29 @@ function AppProvider({ children }) {
     };
 
     const addToCart = (product, qty = 1) => {
+        const amount = Number(qty);
+        if (!product || !Number.isFinite(amount) || amount <= 0) return false;
+        if (Number(product.quantity) <= 0) {
+            showToast(`${product.name} is out of stock`, 'error');
+            return false;
+        }
+
+        let added = false;
         setCart(prev => {
             const existing = prev.find(c => c.productId === product.id);
+            const nextQuantity = (existing?.quantity || 0) + amount;
+            if (nextQuantity > Number(product.quantity)) return prev;
+            added = true;
             if (existing) {
-                return prev.map(c => c.productId === product.id ? { ...c, quantity: c.quantity + qty } : c);
+                return prev.map(c => c.productId === product.id
+                    ? { ...c, product, quantity: nextQuantity }
+                    : c);
             }
-            return [...prev, { productId: product.id, product, quantity: qty }];
+            return [...prev, { productId: product.id, product, quantity: amount }];
         });
-        showToast(`Added ${product.name} to cart`);
+        if (added) showToast(`Added ${product.name} to cart`);
+        else showToast(`Only ${product.quantity} ${product.unit || 'unit'} available`, 'error');
+        return added;
     };
 
     const removeFromCart = (productId) => {
@@ -540,7 +584,21 @@ function AppProvider({ children }) {
 
     const completeSale = (saleData) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { return apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(saleData) }, token).then(() => refreshTenantData()).then(() => { clearCart(); showToast('Sale completed! Receipt generated.'); }); }
+        if (token) {
+            return apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(saleData) }, token).then(data => {
+                // Use the database's authoritative remaining stock instead of calculating it from
+                // potentially stale client state. This also handles duplicate cart lines correctly.
+                if (Array.isArray(data.stock)) {
+                    const stockById = new Map(data.stock.map(item => [item.productId, Number(item.quantity)]));
+                    setProducts(prev => prev.map(product => stockById.has(product.id)
+                        ? { ...product, quantity: stockById.get(product.id) }
+                        : product));
+                }
+                setSales(prev => [...prev, data.sale]);
+                clearCart();
+                showToast('Sale completed! Receipt generated.');
+            });
+        }
         // Reduce inventory
         const updatedProducts = products.map(p => {
             const item = saleData.items.find(i => i.productId === p.id);
@@ -756,7 +814,7 @@ function StatCard({ icon, label, value, sub, color = 'amber' }) {
 }
 
 // ---- Product Card ----
-function ProductCard({ product, onEdit, onDelete, onAddToCart, onAdjustStock }) {
+function ProductCard({ product, onEdit, onDelete, onAddToCart, onAdjustStock, className = '' }) {
     const lowStock = product.quantity <= product.minStockLevel;
     const outOfStock = product.quantity === 0;
     const statusColor = outOfStock ? 'bg-rose-100 text-rose-700' : lowStock ? 'bg-amber-100 text-amber-700' :
@@ -765,7 +823,7 @@ function ProductCard({ product, onEdit, onDelete, onAddToCart, onAdjustStock }) 
     const hasProductImage = typeof product.image === 'string' &&
         (product.image.startsWith('data:image/') || product.image.startsWith('http'));
 
-    return React.createElement('div', { className: 'product-card p-3.5 card-hover' },
+    return React.createElement('div', { className: `${className || 'product-card'} p-3.5 card-hover` },
         React.createElement('div', { className: 'flex items-start gap-3' },
             React.createElement('div', { className: 'w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center text-2xl flex-shrink-0 border border-gray-100' },
                 hasProductImage
@@ -923,8 +981,16 @@ function CartSidebar({ isOpen, onClose }) {
                         React.createElement('span', { className: 'w-6 text-center text-sm font-medium' },
                             item.quantity),
                         React.createElement('button', {
-                            onClick: () => updateCartQty(item.productId, item.quantity + 1),
-                            className: 'w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-sm font-bold'
+                            onClick: () => {
+                                const latest = products.find(p => p.id === item.productId);
+                                if (latest && item.quantity < latest.quantity) updateCartQty(item.productId, item.quantity + 1);
+                                else showToast(`Only ${latest?.quantity ?? 0} ${latest?.unit || 'unit'} available`, 'error');
+                            },
+                            disabled: (() => {
+                                const latest = products.find(p => p.id === item.productId);
+                                return !latest || item.quantity >= latest.quantity;
+                            })(),
+                            className: 'w-7 h-7 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed'
                         }, '+')
                     ),
                     React.createElement('button', {
@@ -1029,8 +1095,10 @@ function CartSidebar({ isOpen, onClose }) {
             ),
             React.createElement('button', {
                 onClick: handleCheckout,
-                className: 'w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition'
-            }, '✅ Complete Sale')
+                disabled: processingSale,
+                'aria-busy': processingSale,
+                className: 'w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition disabled:opacity-60 disabled:cursor-not-allowed'
+            }, processingSale ? '⏳ Processing Sale...' : '✅ Complete Sale')
         ))
     );
 }
@@ -1255,6 +1323,7 @@ function ProductsPage() {
     const [search, setSearch] = useState('');
     const [category, setCategory] = useState('All');
     const [sort, setSort] = useState('name');
+    const [viewMode, setViewMode] = useState(() => DB.get('productsViewMode', 'cards'));
     const [editing, setEditing] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
     const [scannerOpen, setScannerOpen] = useState(false);
@@ -1294,14 +1363,22 @@ function ProductsPage() {
         if (amount !== null) adjustStock(product.id, amount, 'Manual adjustment');
     };
 
+    const changeViewMode = (mode) => {
+        setViewMode(mode);
+        DB.set('productsViewMode', mode);
+    };
+
     return React.createElement('div', { className: 'space-y-4' },
         // Header
         React.createElement('div', { className: 'flex flex-col sm:flex-row sm:items-center justify-between gap-3' },
             React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, '📦 Inventory'),
-            React.createElement('button', {
-                onClick: () => setShowAdd(true),
-                className: 'btn-primary text-sm'
-            }, '➕ Add Product')
+            React.createElement('div', { className: 'flex items-center gap-2' },
+                React.createElement('div', { className: 'view-toggle', role: 'group', 'aria-label': 'Product display' },
+                    React.createElement('button', { type: 'button', className: viewMode === 'cards' ? 'active' : '', onClick: () => changeViewMode('cards'), 'aria-pressed': viewMode === 'cards' }, '▦ Cards'),
+                    React.createElement('button', { type: 'button', className: viewMode === 'grid' ? 'active' : '', onClick: () => changeViewMode('grid'), 'aria-pressed': viewMode === 'grid' }, '▤ Grid')
+                ),
+                React.createElement('button', { onClick: () => setShowAdd(true), className: 'btn-primary text-sm' }, '➕ Add Product')
+            )
         ),
         // Filters
         React.createElement('div', { className: 'flex flex-wrap items-center gap-2' },
@@ -1334,11 +1411,12 @@ function ProductsPage() {
             }, '📷 Scan')
         ),
         // Product grid
-        React.createElement('div', { className: 'grid-cards' },
+        React.createElement('div', { className: viewMode === 'grid' ? 'product-display-grid' : 'grid-cards' },
             filtered.map(p =>
                 React.createElement(ProductCard, {
                     key: p.id,
                     product: p,
+                    className: viewMode === 'grid' ? 'product-card compact' : 'product-card',
                     onEdit: () => setEditing(p),
                     onDelete: handleDelete,
                     onAddToCart: addToCart,
