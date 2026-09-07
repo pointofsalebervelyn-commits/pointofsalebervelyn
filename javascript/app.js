@@ -946,7 +946,7 @@ function CartSidebar({ isOpen, onClose }) {
     };
 
     return React.createElement('div', {
-        className: `fixed top-0 right-0 h-full w-full sm:w-[400px] bg-white shadow-2xl z-50 transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0' : 'translate-x-full'}`,
+        className: `cart-mobile-sheet fixed top-0 right-0 h-full w-full sm:w-[400px] bg-white shadow-2xl z-50 transition-transform duration-300 ease-in-out ${isOpen ? 'translate-x-0 is-open' : 'translate-x-full'}`,
         style: { maxWidth: '100vw' }
     },
         React.createElement('div', { className: 'flex items-center justify-between p-4 border-b border-gray-100' },
@@ -1324,13 +1324,166 @@ function BarcodeScanner({ onDetected, onClose }) {
     );
 }
 
+
+// ---- Mobile-first Sell Page ----
+function SellPage() {
+    const { products, addToCart, cart, showToast } = useApp();
+    const [search, setSearch] = useState('');
+    const [category, setCategory] = useState('All');
+    const categories = useMemo(() => ['All', ...new Set(products.map(p => p.category).filter(Boolean))], [products]);
+    const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return products.filter(p => {
+            const matchesSearch = !q || [p.name, p.barcode, p.category, p.materialType, p.supplier]
+                .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+            return matchesSearch && (category === 'All' || p.category === category);
+        }).sort((a,b) => a.name.localeCompare(b.name));
+    }, [products, search, category]);
+    const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+    const total = cart.reduce((sum, item) => sum + item.quantity * item.product.sellingPrice, 0);
+
+    return React.createElement('div', { className: 'space-y-4 sell-page' },
+        React.createElement('div', { className: 'sell-header' },
+            React.createElement('div', null,
+                React.createElement('h2', { className: 'text-xl sm:text-2xl font-bold text-gray-800' }, '🛒 Sell'),
+                React.createElement('p', { className: 'text-sm text-gray-500 mt-1' }, 'Find a product, choose the quantity, and add it to the cart.')
+            ),
+            React.createElement('button', { onClick: () => setSearch(''), className: 'btn-secondary sell-clear' }, 'Clear search')
+        ),
+        React.createElement('div', { className: 'sell-search-wrap' },
+            React.createElement('span', { className: 'sell-search-icon' }, '🔍'),
+            React.createElement('input', {
+                value: search, onChange: e => setSearch(e.target.value),
+                placeholder: 'Search cement, nails, rods, roofing sheets...',
+                className: 'sell-search', autoComplete: 'off', 'aria-label': 'Search products'
+            })
+        ),
+        React.createElement('div', { className: 'category-scroll', role: 'tablist', 'aria-label': 'Product categories' },
+            categories.map(c => React.createElement('button', {
+                key: c, onClick: () => setCategory(c),
+                className: `filter-chip ${category === c ? 'active' : ''}`,
+                role: 'tab', 'aria-selected': category === c
+            }, c))
+        ),
+        React.createElement('div', { className: 'sell-results-head' },
+            React.createElement('span', null, filtered.length, filtered.length === 1 ? ' product' : ' products'),
+            search && React.createElement('span', { className: 'text-gray-400' }, ` for “${search}”`)
+        ),
+        filtered.length === 0
+            ? React.createElement('div', { className: 'empty-state' },
+                React.createElement('div', { className: 'text-3xl mb-2' }, '🔎'),
+                React.createElement('strong', null, 'No products found'),
+                React.createElement('p', null, 'Try another search or choose a different category.')
+              )
+            : React.createElement('div', { className: 'sell-product-list' },
+                filtered.map(p => {
+                    const out = Number(p.quantity) <= 0;
+                    return React.createElement('div', { key: p.id, className: 'sell-product-row' },
+                        React.createElement('div', { className: 'sell-product-icon' },
+                            typeof p.image === 'string' && (p.image.startsWith('data:image/') || p.image.startsWith('http'))
+                                ? React.createElement('img', { src: p.image, alt: '', loading: 'lazy' })
+                                : p.image || '📦'
+                        ),
+                        React.createElement('div', { className: 'sell-product-info' },
+                            React.createElement('div', { className: 'sell-product-name' }, p.name),
+                            React.createElement('div', { className: 'sell-product-meta' },
+                                formatCurrency(p.sellingPrice), ' · ',
+                                React.createElement('span', { className: out ? 'stock-out' : Number(p.quantity) <= Number(p.minStockLevel) ? 'stock-low' : '' },
+                                    out ? 'Out of stock' : `${p.quantity} ${p.unit || 'in stock'}`
+                                )
+                            )
+                        ),
+                        React.createElement('button', {
+                            disabled: out,
+                            onClick: () => { addToCart(p.id); showToast(`${p.name} added to cart`, 'success'); },
+                            className: 'sell-add-btn'
+                        }, out ? 'Out' : '+ Add')
+                    );
+                })
+            ),
+        totalItems > 0 && React.createElement('button', {
+            className: 'mobile-cart-bar',
+            onClick: () => window.dispatchEvent(new CustomEvent('nexatill:open-cart'))
+        },
+            React.createElement('span', null, '🛒 ', totalItems, totalItems === 1 ? ' item' : ' items'),
+            React.createElement('strong', null, formatCurrency(total)),
+            React.createElement('span', null, 'View cart ›')
+        )
+    );
+}
+
+// ---- Stock Activity Page ----
+function StockActivityPage() {
+    const { stockMovements, products } = useApp();
+    const movements = [...stockMovements].reverse();
+    return React.createElement('div', { className: 'space-y-4' },
+        React.createElement('div', null,
+            React.createElement('h2', { className: 'text-xl sm:text-2xl font-bold text-gray-800' }, '📦 Stock Activity'),
+            React.createElement('p', { className: 'text-sm text-gray-500 mt-1' }, 'A simple history of stock added, removed, and adjusted.')
+        ),
+        React.createElement('div', { className: 'stat-card overflow-hidden' },
+            movements.length === 0
+                ? React.createElement('div', { className: 'empty-state' }, React.createElement('div', { className: 'text-3xl mb-2' }, '📦'), React.createElement('strong', null, 'No stock activity yet'), React.createElement('p', null, 'Stock changes will appear here.'))
+                : React.createElement('div', { className: 'stock-activity-list' },
+                    movements.map(m => {
+                        const product = products.find(p => p.id === m.productId);
+                        return React.createElement('div', { key: m.id, className: 'stock-activity-row' },
+                            React.createElement('div', { className: 'min-w-0' },
+                                React.createElement('strong', { className: 'block truncate' }, product?.name || 'Deleted product'),
+                                React.createElement('span', { className: 'text-xs text-gray-400' }, m.reason || 'Stock adjustment', m.date ? ` · ${new Date(m.date).toLocaleString()}` : '')
+                            ),
+                            React.createElement('span', { className: m.quantity > 0 ? 'stock-in' : 'stock-out' }, m.quantity > 0 ? '+' : '', m.quantity)
+                        );
+                    })
+                )
+        )
+    );
+}
+
+
+// ---- Customers Page ----
+function CustomersPage() {
+    const { customers, sales } = useApp();
+    const customerList = [...(customers || [])].sort((a,b) => String(a.name||'').localeCompare(String(b.name||'')));
+    return React.createElement('div', { className: 'space-y-4' },
+        React.createElement('div', null,
+            React.createElement('h2', { className: 'text-xl sm:text-2xl font-bold text-gray-800' }, '👥 Customers'),
+            React.createElement('p', { className: 'text-sm text-gray-500 mt-1' }, 'Keep track of customers and what they owe.')
+        ),
+        customerList.length === 0
+            ? React.createElement('div', { className: 'empty-state' },
+                React.createElement('div', { className: 'text-3xl mb-2' }, '👥'),
+                React.createElement('strong', null, 'No customers yet'),
+                React.createElement('p', null, 'Customers will appear here when they are added to sales.')
+              )
+            : React.createElement('div', { className: 'customer-list stat-card overflow-hidden' },
+                customerList.map(c => {
+                    const name = c.name || 'Unnamed customer';
+                    const customerSales = (sales || []).filter(s => s.customerName === name && isActiveSale(s));
+                    const total = customerSales.reduce((sum,s) => sum + Number(s.total || 0), 0);
+                    const balance = Number(c.balance || c.amountOwed || 0);
+                    return React.createElement('div', { key: c.id || name, className: 'customer-row' },
+                        React.createElement('div', { className: 'min-w-0' },
+                            React.createElement('strong', { className: 'block truncate' }, name),
+                            React.createElement('span', { className: 'text-xs text-gray-400' }, c.phone || `${customerSales.length} recorded sale${customerSales.length === 1 ? '' : 's'}`)
+                        ),
+                        React.createElement('div', { className: 'text-right' },
+                            React.createElement('strong', { className: 'block' }, formatCurrency(balance)),
+                            React.createElement('span', { className: balance > 0 ? 'text-xs text-rose-500' : 'text-xs text-emerald-600' }, balance > 0 ? 'Balance owed' : 'No balance')
+                        )
+                    );
+                })
+              )
+    );
+}
+
 // ---- Products Page ----
 function ProductsPage() {
     const { products, deleteProduct, addToCart, adjustStock, stockMovements, showToast } = useApp();
     const [search, setSearch] = useState('');
     const [category, setCategory] = useState('All');
     const [sort, setSort] = useState('name');
-    const [viewMode, setViewMode] = useState(() => DB.get('productsViewMode', 'cards'));
+    const [viewMode, setViewMode] = useState(() => DB.get('productsViewMode', 'grid'));
     const [editing, setEditing] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
     const [scannerOpen, setScannerOpen] = useState(false);
@@ -1441,18 +1594,6 @@ function ProductsPage() {
             ),
         filtered.length === 0 && React.createElement('p', { className: 'text-center text-gray-400 py-8' },
             'No products found'),
-        stockMovements.length > 0 && React.createElement('div', { className: 'stat-card p-4' },
-            React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' }, '📦 Recent Stock Activity'),
-            stockMovements.slice(-5).reverse().map(movement => {
-                const product = products.find(item => item.id === movement.productId);
-                return React.createElement('div', { key: movement.id, className: 'flex justify-between items-center py-1.5 border-b border-gray-50 text-xs' },
-                    React.createElement('span', { className: 'text-gray-600 truncate pr-2' }, product?.name || 'Deleted product'),
-                    React.createElement('span', { className: movement.quantity > 0 ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold' },
-                        movement.quantity > 0 ? '+' : '', movement.quantity, ' ', movement.reason)
-                );
-            })
-        ),
-
         // Add modal
         Modal({
             isOpen: showAdd,
@@ -2678,8 +2819,8 @@ React.createElement('button', { onClick: handleAddUser, className: 'btn-primary'
 function Tour({ step, onNext, onBack, onClose, onNavigate }) {
     const steps = [
         { page: 'dashboard', icon: '📊', title: 'Your business at a glance', text: 'See today\'s sales, stock levels, register status, and recent activity from one screen.' },
-        { page: 'products', icon: '📦', title: 'Sell and manage products', text: 'Search products, scan barcodes, adjust stock, and add items to the cart with one tap.' },
-        { page: 'products', icon: '🛒', title: 'Checkout made simple', text: 'Open the cart, choose a payment method, enter cash received, and see the change instantly.' },
+        { page: 'sell', icon: '🛒', title: 'Sell quickly', text: 'Search products, choose a quantity, and add items to the cart with one tap.' },
+        { page: 'products', icon: '📦', title: 'Manage your stock', text: 'Open the cart, choose a payment method, enter cash received, and see the change instantly.' },
         { page: 'reports', icon: '📈', title: 'Know how the shop is doing', text: 'Use Reports for daily closing, payment totals, profit, expenses, and best-selling products.' },
         { page: 'settings', icon: '🛡️', title: 'Keep your data protected', text: 'Export backups, restore records, review the activity log, and restart this tour from Settings.' }
     ];
@@ -2722,6 +2863,11 @@ useEffect(() => {
     window.addEventListener('nexatill:start-tour', openTour);
     return () => window.removeEventListener('nexatill:start-tour', openTour);
 }, []);
+useEffect(() => {
+    const openCart = () => setCartOpen(true);
+    window.addEventListener('nexatill:open-cart', openCart);
+    return () => window.removeEventListener('nexatill:open-cart', openCart);
+}, []);
 
 if (!currentUser || !hasSession) return React.createElement(SettingsPage);
 
@@ -2733,12 +2879,21 @@ const closeTour = () => {
 const isCashier = currentUser?.role === 'cashier';
 const restrictedPages = ['suppliers', 'expenses', 'reports'];
 const navItems = [
-{ id: 'dashboard', label: 'Dashboard', icon: '📊' },
-{ id: 'products', label: 'Products', icon: '📦' },
-{ id: 'sales', label: 'Sales Records', icon: '📋' },
+{ id: 'dashboard', label: 'Home', icon: '🏠' },
+{ id: 'sell', label: 'Sell', icon: '🛒' },
+{ id: 'products', label: 'Stock', icon: '📦' },
+{ id: 'sales', label: 'Sales', icon: '🧾' },
+{ id: 'customers', label: 'Customers', icon: '👥' },
+{ id: 'expenses', label: 'Expenses', icon: '💰' },
+{ id: 'reports', label: 'Reports', icon: '📊' },
+{ id: 'settings', label: 'Settings', icon: '⚙️' },
+].filter(item => !isCashier || !restrictedPages.includes(item.id));
+const moreItems = [
+{ id: 'customers', label: 'Customers', icon: '👥' },
 { id: 'suppliers', label: 'Suppliers', icon: '🏢' },
-{ id: 'expenses', label: 'Expenses', icon: '💸' },
-{ id: 'reports', label: 'Reports', icon: '📈' },
+{ id: 'expenses', label: 'Expenses', icon: '💰' },
+{ id: 'reports', label: 'Reports', icon: '📊' },
+{ id: 'stockActivity', label: 'Stock Activity', icon: '📦' },
 { id: 'settings', label: 'Settings', icon: '⚙️' },
 ].filter(item => !isCashier || !restrictedPages.includes(item.id));
 
@@ -2750,10 +2905,16 @@ if (isCashier && restrictedPages.includes(currentPage)) {
 switch (currentPage) {
 case 'dashboard':
 return React.createElement(Dashboard);
+case 'sell':
+return React.createElement(SellPage);
 case 'products':
 return React.createElement(ProductsPage);
 case 'sales':
 return React.createElement(SalesPage);
+case 'customers':
+return React.createElement(CustomersPage);
+case 'stockActivity':
+return React.createElement(StockActivityPage);
 case 'suppliers':
 return React.createElement(SuppliersPage);
 case 'expenses':
@@ -2776,27 +2937,38 @@ className: `absolute inset-0 bg-black/40 overlay ${sidebarOpen ? 'open' : ''}`,
 onClick: () => setSidebarOpen(false)
 }),
 React.createElement('div', {
-className: `absolute top-0 left-0 bottom-0 w-72 bg-white shadow-2xl mobile-nav ${sidebarOpen ? 'open' : ''}`
+className: `absolute top-0 left-0 bottom-0 w-80 max-w-[88vw] bg-white shadow-2xl mobile-nav ${sidebarOpen ? 'open' : ''}`
 },
-React.createElement('div', { className: 'p-4 border-b border-gray-100' },
+React.createElement('div', { className: 'p-5 border-b border-gray-100' },
 React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, '🏪 ', currentCompany?.name || 'KoraPoint'),
-React.createElement('p', { className: 'text-xs text-gray-400' }, currentCompany?.business_type || 'Point of Sale')
+React.createElement('p', { className: 'text-sm text-gray-500 mt-1' }, 'Simple shop management')
 ),
-React.createElement('nav', { className: 'p-3 space-y-0.5' },
-navItems.map(item =>
+React.createElement('div', { className: 'p-3' },
+React.createElement('p', { className: 'px-3 py-2 text-xs font-bold uppercase tracking-wide text-gray-400' }, 'Main menu'),
+navItems.slice(0, 4).map(item =>
 React.createElement('button', {
 key: item.id,
-onClick: () => { setCurrentPage(item.id);
-setSidebarOpen(false); },
-className: `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition sidebar-link ${currentPage === item.id ? 'active bg-amber-50 text-amber-700' : 'text-gray-600 hover:bg-gray-50'}`
+onClick: () => { setCurrentPage(item.id); setSidebarOpen(false); },
+className: `w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-base font-semibold transition sidebar-link ${currentPage === item.id ? 'active bg-amber-50 text-amber-700' : 'text-gray-600 hover:bg-gray-50'}`
 },
-React.createElement('span', null, item.icon),
+React.createElement('span', { className: 'text-xl' }, item.icon),
+React.createElement('span', null, item.label)
+)
+),
+React.createElement('p', { className: 'px-3 pt-5 pb-2 text-xs font-bold uppercase tracking-wide text-gray-400' }, 'More'),
+moreItems.map(item =>
+React.createElement('button', {
+key: `more-${item.id}`,
+onClick: () => { setCurrentPage(item.id); setSidebarOpen(false); },
+className: `w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold transition ${currentPage === item.id ? 'bg-amber-50 text-amber-700' : 'text-gray-600 hover:bg-gray-50'}`
+},
+React.createElement('span', { className: 'text-lg' }, item.icon),
 React.createElement('span', null, item.label)
 )
 )
 )
 )
-);
+); 
 
 // Desktop sidebar
 const DesktopSidebar = () => React.createElement('div', { className: 'hidden lg:flex lg:flex-col lg:w-56 lg:flex-shrink-0 lg:bg-white lg:border-r lg:border-gray-100 lg:min-h-screen lg:sticky lg:top-0 lg:max-h-screen lg:overflow-y-auto' },
@@ -2882,12 +3054,16 @@ className: 'hidden lg:flex items-center gap-2 px-4 py-2 bg-amber-50 hover:bg-amb
 renderPage()
 )
 ),
-React.createElement('nav', { className: 'mobile-bottom-nav lg:hidden' },
+React.createElement('nav', { className: 'mobile-bottom-nav lg:hidden', 'aria-label': 'Main navigation' },
 navItems.slice(0, 4).map(item => React.createElement('button', {
 key: item.id,
 onClick: () => setCurrentPage(item.id),
 className: currentPage === item.id ? 'active' : ''
-}, React.createElement('span', null, item.icon), React.createElement('span', null, item.label)))
+}, React.createElement('span', { className: 'mobile-nav-icon' }, item.icon), React.createElement('span', null, item.label))),
+React.createElement('button', {
+onClick: () => setSidebarOpen(true),
+className: sidebarOpen ? 'active' : ''
+}, React.createElement('span', { className: 'mobile-nav-icon' }, '☰'), React.createElement('span', null, 'More'))
 ),
 // Cart sidebar
 React.createElement(CartSidebar, { isOpen: cartOpen, onClose: () => setCartOpen(false) })
