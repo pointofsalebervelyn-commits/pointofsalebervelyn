@@ -1684,8 +1684,8 @@ function ProductForm({ product, onClose, mode }) {
         category: selectedProduct?.category || 'Cement',
         materialType: selectedProduct?.materialType || '',
         supplier: selectedProduct?.supplier || '',
-        buyingPrice: selectedProduct?.buyingPrice ?? 0,
-        sellingPrice: selectedProduct?.sellingPrice ?? 0,
+        buyingPrice: (selectedProduct && Number(selectedProduct.buyingPrice) > 0) ? selectedProduct.buyingPrice : '',
+        sellingPrice: (selectedProduct && Number(selectedProduct.sellingPrice) > 0) ? selectedProduct.sellingPrice : '',
         quantity: Math.round(Number(selectedProduct?.quantity ?? 0)),
         minStockLevel: Math.round(Number(selectedProduct?.minStockLevel ?? 5)),
         unit: selectedProduct?.unit || 'piece',
@@ -1740,11 +1740,11 @@ function ProductForm({ product, onClose, mode }) {
         e.preventDefault();
         if (saving) return;
         if (!form.name.trim()) { showToast('Product name is required', 'error'); return; }
-        if (form.buyingPrice < 0 || form.sellingPrice <= 0 || form.quantity < 0 || form.minStockLevel < 0) {
+        if ((form.buyingPrice !== '' && Number(form.buyingPrice) < 0) || Number(form.sellingPrice) <= 0 || Number(form.quantity) < 0 || Number(form.minStockLevel) < 0) {
             showToast('Enter valid prices and stock quantities', 'error');
             return;
         }
-        const data = { ...form };
+        const data = { ...form, buyingPrice: form.buyingPrice === '' ? 0 : Number(form.buyingPrice), sellingPrice: Number(form.sellingPrice) };
         setSaving(true);
         try {
             if (mode === 'add') await addProduct(data);
@@ -1874,8 +1874,8 @@ function ProductForm({ product, onClose, mode }) {
                     type: 'number',
                     step: '0.01',
                     value: form.buyingPrice,
-                    onChange: (e) => setForm(prev => ({ ...prev, buyingPrice: parseFloat(e.target.value) ||
-                            0 })),
+                    placeholder: 'e.g. 85.00',
+                    onChange: (e) => setForm(prev => ({ ...prev, buyingPrice: e.target.value === '' ? '' : Number(e.target.value) })),
                     className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm'
                 })
             ),
@@ -1886,8 +1886,8 @@ function ProductForm({ product, onClose, mode }) {
                     type: 'number',
                     step: '0.01',
                     value: form.sellingPrice,
-                    onChange: (e) => setForm(prev => ({ ...prev, sellingPrice: parseFloat(e.target.value) ||
-                            0 })),
+                    placeholder: 'e.g. 100.00',
+                    onChange: (e) => setForm(prev => ({ ...prev, sellingPrice: e.target.value === '' ? '' : Number(e.target.value) })),
                     className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
                     required: true
                 })
@@ -2596,7 +2596,7 @@ setShowAdd(false);
 };
 
 const handleDeleteUser = async (id) => {
-if (!['owner', 'manager'].includes(currentUser?.role)) { showToast('Only the owner or a manager can revoke access', 'error'); return; }
+if (currentUser?.role !== 'owner') { showToast('Only the owner can revoke user access', 'error'); return; }
 if (id === currentUser?.id) { showToast('Cannot delete yourself', 'error'); return; }
 if (window.confirm('Delete this user?')) {
 const mutation = apiMutation(`/api/users/${id}`, 'DELETE', undefined, 'User removed');
@@ -2693,7 +2693,7 @@ React.createElement('div', { className: 'login-visual-footer' }, 'A calmer way t
 }
 
 
-return React.createElement('div', { className: 'space-y-4' },
+return React.createElement('div', { className: 'settings-page-layout' },
 React.createElement('div', { className: 'flex items-center justify-between' },
 React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, '⚙️ Settings'),
 React.createElement('button', {
@@ -2784,7 +2784,7 @@ React.createElement('p', null, '8. Each company sees only its own workspace.')
 ),
 ['owner', 'manager'].includes(currentUser?.role) && React.createElement('div', { className: 'flex items-center justify-between' },
 React.createElement('h3', { className: 'font-semibold text-gray-700' }, '👥 Users'),
-React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Owner: full access · Manager: shop operations + staff · Cashier: selling and checkout only.'),
+React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Owner: full access + user access control · Manager: shop operations + staff · Cashier: selling and checkout only.'),
 React.createElement('button', {
 onClick: () => setShowAdd(true),
 className: 'btn-primary text-sm'
@@ -2797,7 +2797,7 @@ React.createElement('div', null,
 React.createElement('p', { className: 'font-medium text-gray-800 text-sm' }, u.name),
 React.createElement('p', { className: 'text-xs text-gray-400' }, u.role === 'owner' ? 'Full access' : u.role === 'manager' ? 'Shop + staff management' : 'Sales + checkout')
 ),
-u.id !== currentUser?.id && React.createElement('button', {
+currentUser?.role === 'owner' && u.id !== currentUser?.id && React.createElement('button', {
 onClick: () => handleDeleteUser(u.id),
 className: 'text-rose-400 hover:text-rose-600 text-sm'
 }, '🗑')

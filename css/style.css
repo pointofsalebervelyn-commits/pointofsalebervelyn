@@ -1340,3 +1340,48 @@ body{background:radial-gradient(circle at 5% 0%,rgba(23,105,170,.13),transparent
 .kora-install-card{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:16px!important}
 .kora-install-card .btn-primary{background:linear-gradient(135deg,#f97316,#ea580c)!important;color:#fff!important}
 @media(max-width:600px){.kora-install-card{flex-direction:column!important;align-items:stretch!important}.kora-install-card button{width:100%!important}}
+
+
+/* FINAL SETTINGS LAYOUT — clean vertical sections instead of a horizontal card row */
+.settings-page-layout{
+  display:flex!important;
+  flex-direction:column!important;
+  gap:16px!important;
+  width:100%!important;
+  max-width:1200px!important;
+  margin:0 auto!important;
+}
+.settings-page-layout > .stat-card,
+.settings-page-layout > .manager-reset-card,
+.settings-page-layout > .settings-section{
+  width:100%!important;
+  min-width:0!important;
+  flex:none!important;
+}
+.settings-page-layout > .stat-card{padding:18px!important}
+.settings-page-layout .kora-install-card{
+  display:flex!important;
+  flex-direction:row!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+}
+.settings-page-layout .manager-reset-card{
+  display:flex!important;
+  flex-direction:row!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+}
+.settings-page-layout input,
+.settings-page-layout select,
+.settings-page-layout button{max-width:100%}
+.settings-page-layout .settings-users-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+@media(max-width:700px){
+  .settings-page-layout{gap:12px!important}
+  .settings-page-layout .kora-install-card,
+  .settings-page-layout .manager-reset-card{flex-direction:column!important;align-items:stretch!important}
+  .settings-page-layout .kora-install-card button,
+  .settings-page-layout .manager-reset-card button{width:100%!important}
+  .settings-page-layout .settings-users-list{grid-template-columns:1fr}
+}
+/* Price inputs: show a helpful hint instead of an unhelpful 0 for empty/new products. */
+input[placeholder="e.g. 85.00"],input[placeholder="e.g. 100.00"]::placeholder{color:#9aa7b5}
