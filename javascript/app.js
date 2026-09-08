@@ -3131,3 +3131,85 @@ function KoraPWAInstallCard() {
     )
   );
 }
+
+
+/* KoraPoint PWA INSTALL MANAGER — Settings button + browser prompt */
+(function(){
+  let deferredPrompt = null;
+
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault();
+    deferredPrompt = e;
+    window.__koraInstallPrompt = e;
+    showInstallControl();
+  });
+
+  window.addEventListener('appinstalled', function(){
+    deferredPrompt = null;
+    window.__koraInstallPrompt = null;
+    showInstallControl();
+  });
+
+  function isStandalone(){
+    return window.matchMedia && window.matchMedia('(display-mode: standalone)').matches ||
+           window.navigator.standalone === true;
+  }
+
+  function settingsHost(){
+    return document.querySelector('#settings, [data-page="settings"], .settings-page, [id*="settings"]');
+  }
+
+  function showInstallControl(){
+    const host=settingsHost();
+    if(!host) return;
+    let box=document.getElementById('kora-pwa-install');
+    if(!box){
+      box=document.createElement('section');
+      box.id='kora-pwa-install';
+      box.className='kora-pwa-install-card';
+      host.appendChild(box);
+    }
+
+    const installed=isStandalone();
+    if(installed){
+      box.innerHTML='<div><h3>📲 KoraPoint App</h3><p>KoraPoint is installed on this device.</p></div><span class="kora-installed-badge">✓ Installed</span>';
+      return;
+    }
+
+    box.innerHTML='<div><h3>📲 Install KoraPoint</h3><p>Install the POS on this device for faster access and an app-like experience.</p></div><button type="button" id="kora-install-btn" class="kora-install-button">INSTALL APP</button>';
+    document.getElementById('kora-install-btn').onclick=async function(){
+      if(deferredPrompt){
+        try{
+          deferredPrompt.prompt();
+          const choice=await deferredPrompt.userChoice;
+          if(choice && choice.outcome==='accepted'){
+            deferredPrompt=null;
+            window.__koraInstallPrompt=null;
+          }
+          showInstallControl();
+          return;
+        }catch(err){ console.error('PWA install prompt error',err); }
+      }
+      // Browser does not currently expose beforeinstallprompt. Give useful
+      // instructions rather than hiding the feature.
+      box.querySelector('p').textContent='Use your browser menu and choose “Install KoraPoint” or “Add to Home screen”.';
+      box.querySelector('button').textContent='OPEN BROWSER MENU';
+      box.querySelector('button').onclick=function(){
+        alert('Open your browser menu (⋮) and choose “Install KoraPoint” or “Add to Home screen”.');
+      };
+    };
+  }
+
+  function hook(){
+    showInstallControl();
+    setTimeout(showInstallControl,300);
+    setTimeout(showInstallControl,1000);
+    setTimeout(showInstallControl,2000);
+  }
+  document.addEventListener('DOMContentLoaded',hook);
+  window.addEventListener('load',hook);
+  document.addEventListener('settings:opened',showInstallControl);
+  // SPA navigation often changes the Settings DOM without a page reload.
+  const obs=new MutationObserver(function(){ if(settingsHost()) showInstallControl(); });
+  obs.observe(document.documentElement,{childList:true,subtree:true});
+})();
