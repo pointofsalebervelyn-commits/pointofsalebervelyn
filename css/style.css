@@ -1337,21 +1337,6 @@ body{background:radial-gradient(circle at 5% 0%,rgba(23,105,170,.13),transparent
 .pwa-install-card{border:1px solid rgba(23,105,170,.16)!important;background:linear-gradient(135deg,#fff,#f5fbff)!important}
 .pwa-installed-badge{display:inline-flex;align-items:center;padding:9px 12px;border-radius:999px;background:#e7f7f4;color:#0f766e;font-size:12px;font-weight:800}
 
-/* PWA installation control — deliberately high visibility */
-#kora-pwa-install{
-  display:flex!important;align-items:center!important;justify-content:space-between!important;
-  gap:16px!important;margin:20px 0!important;padding:18px!important;
-  border:1px solid rgba(23,105,170,.18)!important;border-radius:16px!important;
-  background:#fff!important;box-shadow:0 8px 24px rgba(15,76,129,.10)!important;
-}
-#kora-pwa-install h3{margin:0 0 5px!important}
-#kora-pwa-install p{margin:0!important;color:#5b6b82!important}
-.kora-install-button{
-  min-height:46px!important;padding:12px 20px!important;border:0!important;border-radius:10px!important;
-  background:#f97316!important;color:#fff!important;font-weight:800!important;cursor:pointer!important;
-}
-.kora-installed-badge{font-weight:800;padding:9px 12px;border-radius:999px;background:#eafaf8}
-@media(max-width:600px){
- #kora-pwa-install{flex-direction:column!important;align-items:stretch!important}
- .kora-install-button{width:100%!important}
-}
+.kora-install-card{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:16px!important}
+.kora-install-card .btn-primary{background:linear-gradient(135deg,#f97316,#ea580c)!important;color:#fff!important}
+@media(max-width:600px){.kora-install-card{flex-direction:column!important;align-items:stretch!important}.kora-install-card button{width:100%!important}}

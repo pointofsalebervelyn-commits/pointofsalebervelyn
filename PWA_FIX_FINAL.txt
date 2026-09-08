@@ -1,0 +1,1 @@
+Final PWA fix: direct Settings JSX install button; root manifest; PNG 192/512 icons; root scope/start_url; service worker v5.

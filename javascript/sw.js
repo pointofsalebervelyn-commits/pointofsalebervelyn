@@ -1,5 +1,8 @@
-const CACHE_NAME = 'korapoint-shell-v4';
+const CACHE_NAME = 'korapoint-shell-v5';
 const APP_SHELL = [
+  '/manifest.webmanifest',
+  '/assets/korapoint-192.png',
+  '/assets/korapoint-512.png',
   '../html/',
   '../html/index.html',
   '../css/style.css',
