@@ -3164,3 +3164,79 @@ function removeRequestedSummaryCards() {
 }
 document.addEventListener('DOMContentLoaded', removeRequestedSummaryCards);
 window.addEventListener('load', removeRequestedSummaryCards);
+
+/* FINAL UI CLEANUP: remove only requested summary cards; NEVER remove product cards. */
+(function(){
+  const unwanted = [
+    'total revenue','gross profit','total expenses',
+    'monthly sales','weekly sales'
+  ];
+  function cleanSummaryCards(){
+    const all = document.querySelectorAll('body *');
+    all.forEach(el=>{
+      if (!el || el.nodeType !== 1) return;
+      if (el.classList && el.classList.contains('product-card')) return;
+      const txt=(el.textContent||'').replace(/\s+/g,' ').trim().toLowerCase();
+      if (!txt || txt.length > 140) return;
+      if (unwanted.some(x=>txt===x || txt.startsWith(x+':') || txt.startsWith(x+' '))) {
+        let card=el;
+        for(let i=0;i<4 && card.parentElement;i++){
+          const p=card.parentElement;
+          const pt=(p.textContent||'').replace(/\s+/g,' ').trim().toLowerCase();
+          if(pt.length<=500 && (p.classList.contains('stat-card')||p.classList.contains('summary-card')||
+             p.classList.contains('metric-card')||p.classList.contains('kpi-card')||p.classList.contains('card'))) {
+            card=p; break;
+          }
+          card=p;
+        }
+        if(card && !card.classList.contains('product-card')) card.remove();
+      }
+    });
+  }
+  document.addEventListener('DOMContentLoaded',cleanSummaryCards);
+  window.addEventListener('load',cleanSummaryCards);
+  setTimeout(cleanSummaryCards,500);
+  setTimeout(cleanSummaryCards,1500);
+})();
+
+/* FINAL MANAGER RESET: deterministic Settings injection */
+(function(){
+  function currentUser(){
+    return window.currentUser || window.user || window.authUser || null;
+  }
+  function roleOf(u){
+    return String(u?.role || u?.user_metadata?.role || u?.app_metadata?.role || '').toLowerCase();
+  }
+  function ensureReset(){
+    const u=currentUser(), role=roleOf(u);
+    if(!['manager','owner','admin'].includes(role)) return;
+    if(document.getElementById('manager-reset-control')) return;
+    const settings = document.querySelector('#settings, [data-page="settings"], .settings-page');
+    if(!settings) return;
+    const el=document.createElement('div');
+    el.id='manager-reset-control';
+    el.className='manager-reset-card';
+    el.innerHTML='<div><h3>Reset POS</h3><p>Manager only — clear operational records and start afresh.</p></div><button id="manager-reset-button" type="button" class="manager-reset-button">RESET WHOLE POS</button>';
+    settings.appendChild(el);
+    el.querySelector('button').onclick=async function(){
+      if(prompt('Type RESET to confirm clearing the POS records.')!=='RESET') return;
+      const b=this; b.disabled=true; b.textContent='RESETTING…';
+      try{
+        let token=null;
+        if(typeof getAccessToken==='function') token=await getAccessToken();
+        const h={'Content-Type':'application/json'}; if(token) h.Authorization='Bearer '+token;
+        const r=await fetch('/api/admin/reset',{method:'POST',headers:h,body:JSON.stringify({confirmation:'RESET'})});
+        if(!r.ok) throw new Error('Reset failed '+r.status);
+        b.textContent='RESET COMPLETE';
+        setTimeout(()=>location.reload(),800);
+      }catch(e){
+        console.error(e); b.disabled=false; b.textContent='RESET WHOLE POS';
+        alert('Reset failed. Check your connection and try again.');
+      }
+    };
+  }
+  document.addEventListener('DOMContentLoaded',ensureReset);
+  window.addEventListener('load',ensureReset);
+  document.addEventListener('settings:opened',ensureReset);
+  setInterval(ensureReset,1000);
+})();

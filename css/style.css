@@ -1290,3 +1290,46 @@ body{background:radial-gradient(circle at 5% 0%,rgba(23,105,170,.13),transparent
 /* Requested summary-card removals — Product Cards are intentionally untouched. */
 .summary-card:has(.card-title, .label),
 .stat-card:has(.card-title, .label) { }
+
+/* FINAL MOBILE SALES RECORD + STOCK UX */
+@media (max-width: 600px){
+  .sales-records, .sales-table-container, .daily-sales-table, [data-section="sales-records"]{
+    width:100%!important; max-width:100%!important; overflow-x:auto!important;
+  }
+  .sales-records table, .daily-sales-table{
+    width:100%!important; min-width:620px;
+    font-size:12px;
+  }
+  .sales-records th,.sales-records td,.daily-sales-table th,.daily-sales-table td{
+    padding:8px 7px!important; white-space:nowrap;
+  }
+
+  /* Stock/Product list: cards stay unchanged, but dense list/table layouts fit the phone. */
+  .stock-page .table-container, .inventory-page .table-container,
+  .stock-page .products-table, .inventory-page .products-table{
+    width:100%!important; overflow-x:auto!important;
+  }
+  .stock-page table, .inventory-page table{
+    min-width:0!important; width:100%!important;
+    table-layout:fixed!important;
+  }
+  .stock-page th,.stock-page td,.inventory-page th,.inventory-page td{
+    padding:7px 5px!important; font-size:11px!important;
+    overflow:hidden; text-overflow:ellipsis;
+  }
+  .stock-page th:nth-child(n+5), .stock-page td:nth-child(n+5),
+  .inventory-page th:nth-child(n+5), .inventory-page td:nth-child(n+5){
+    display:none!important;
+  }
+  .stock-page th:nth-child(1),.stock-page td:nth-child(1),
+  .inventory-page th:nth-child(1),.inventory-page td:nth-child(1){width:43%}
+  .stock-page th:nth-child(2),.stock-page td:nth-child(2),
+  .inventory-page th:nth-child(2),.inventory-page td:nth-child(2){width:20%}
+  .stock-page th:nth-child(3),.stock-page td:nth-child(3),
+  .inventory-page th:nth-child(3),.inventory-page td:nth-child(3){width:18%}
+  .stock-page th:nth-child(4),.stock-page td:nth-child(4),
+  .inventory-page th:nth-child(4),.inventory-page td:nth-child(4){width:19%}
+
+  .manager-reset-card{margin:18px 0!important;padding:16px!important;display:flex!important;flex-direction:column!important;align-items:stretch!important}
+  .manager-reset-button{width:100%!important;min-height:48px!important}
+}
