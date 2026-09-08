@@ -2600,12 +2600,21 @@ setShowAdd(false);
 const handleDeleteUser = async (id) => {
 if (currentUser?.role !== 'owner') { showToast('Only the business owner can revoke user access', 'error'); return; }
 if (id === currentUser?.id) { showToast('Cannot delete yourself', 'error'); return; }
-if (window.confirm('Delete this user?')) {
-const mutation = apiMutation(`/api/users/${id}`, 'DELETE', undefined, 'User removed');
-if (mutation) { try { await mutation; } catch (error) { showToast(error.message, 'error'); } return; }
+const target = safeUsers.find(u => u.id === id);
+if (!target) return;
+if (!window.confirm(`Revoke ${target.name || 'this user'}'s access? They will no longer be able to sign in.`)) return;
+const token = DB.get(SESSION_KEY, null)?.accessToken;
+if (token && token !== 'local-demo-token') {
+try {
+const response = await apiRequest(`/api/users/${id}`, { method: 'DELETE' }, token);
 setUsers(prev => prev.filter(u => u.id !== id));
-showToast('User removed', 'info');
+await refreshTenantData();
+showToast(response.message || 'User access revoked', 'info');
+} catch (error) { showToast(error.message || 'Could not revoke user access', 'error'); }
+return;
 }
+setUsers(prev => prev.filter(u => u.id !== id));
+showToast('User access revoked', 'info');
 };
 
 const handleRestore = (event) => {

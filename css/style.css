@@ -1380,3 +1380,43 @@ body{background:radial-gradient(circle at 5% 0%,rgba(23,105,170,.13),transparent
   .settings-page > .kora-install-card{display:flex !important;flex-direction:column !important;align-items:stretch !important;}
   .settings-page > .kora-install-card button{width:100%;}
 }
+
+
+/* GRAND FINAL SETTINGS DESKTOP LAYOUT
+   Deliberately uses explicit grid placement so Settings never becomes a horizontal card chain. */
+@media (min-width: 901px) {
+  .settings-page {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    display: grid !important;
+    grid-template-columns: repeat(12, minmax(0, 1fr)) !important;
+    gap: 18px !important;
+    align-items: stretch !important;
+  }
+  .settings-page > .settings-header { grid-column: 1 / -1 !important; }
+  .settings-page > .kora-install-card { grid-column: 1 / span 6 !important; }
+  .settings-page > .stat-card:nth-child(3) { grid-column: 7 / span 6 !important; }
+  .settings-page > .stat-card:nth-child(4) { grid-column: 1 / span 6 !important; }
+  .settings-page > .stat-card:nth-child(5) { grid-column: 7 / span 6 !important; }
+  .settings-page > .manager-reset-card { grid-column: 1 / span 6 !important; }
+  .settings-page > .stat-card:nth-child(7) { grid-column: 7 / span 6 !important; }
+  .settings-page > .stat-card:nth-child(8) { grid-column: 1 / span 6 !important; }
+  .settings-page > .stat-card:nth-child(9) { grid-column: 7 / span 6 !important; }
+  .settings-page > .stat-card:nth-child(10) { grid-column: 1 / -1 !important; }
+  .settings-page > .flex.items-center.justify-between { grid-column: 1 / -1 !important; }
+  .settings-page > .space-y-2 { grid-column: 1 / -1 !important; }
+  .settings-page .stat-card,
+  .settings-page .manager-reset-card,
+  .settings-page .kora-install-card { width: 100%; box-sizing: border-box; }
+  .settings-page .stat-card { min-height: 100%; }
+}
+
+/* User management: make destructive action unmistakable but compact. */
+.settings-page .text-rose-400 {
+  border: 1px solid rgba(225,29,72,.16);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #fff7f8;
+  font-weight: 700;
+}

@@ -382,7 +382,28 @@ app.post('/api/users', requireAuth, requireStaffAdmin, async (req, res, next) =>
         }
     } catch (error) { next(error); }
 });
-app.delete('/api/users/:id', requireAuth, requireStaffAdmin, async (req, res, next) => { try { if (req.params.id === req.user.id) return res.status(400).json({ error: 'You cannot revoke yourself' }); const result = await pool.query('UPDATE users SET is_active=false WHERE id=$1 AND tenant_id=$2 RETURNING name', [req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'User not found' }); await addAudit(pool, req.user.tenant_id, req.user.id, 'Staff access revoked', result.rows[0].name); res.status(204).end(); } catch (error) { next(error); } });
+app.delete('/api/users/:id', requireAuth, async (req, res, next) => {
+    // Only the business owner can revoke another user's access.
+    if (req.user.role !== 'owner') return res.status(403).json({ error: 'Only the business owner can revoke user access' });
+    if (req.params.id === req.user.id) return res.status(400).json({ error: 'You cannot revoke yourself' });
+    try {
+        const result = await pool.query(
+            'SELECT id, auth_user_id, name FROM users WHERE id=$1 AND tenant_id=$2 AND is_active=true',
+            [req.params.id, req.user.tenant_id]
+        );
+        if (!result.rowCount) return res.status(404).json({ error: 'Active user not found' });
+        const target = result.rows[0];
+
+        // Revoke the application account first. The database row is kept so audit/history
+        // remains intact, but the account can no longer authenticate into the workspace.
+        await pool.query('UPDATE users SET is_active=false WHERE id=$1 AND tenant_id=$2', [target.id, req.user.tenant_id]);
+        if (target.auth_user_id) {
+            await supabaseAdminRequest(`/auth/v1/admin/users/${target.auth_user_id}`, { method: 'DELETE' }).catch(() => null);
+        }
+        await addAudit(pool, req.user.tenant_id, req.user.id, 'Staff access revoked', target.name);
+        res.json({ ok: true, message: `${target.name}'s access has been revoked.` });
+    } catch (error) { next(error); }
+});
 app.patch('/api/auth/password', requireAuth, async (req, res, next) => {
     const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
     const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
