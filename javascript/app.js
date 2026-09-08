@@ -1301,11 +1301,6 @@ function Dashboard() {
             React.createElement(StatCard, { icon: '📦', label: 'Products', value: totalProducts, color: 'amber' }),
             !isCashier && React.createElement(StatCard, { icon: '💰', label: "Today's Sales", value: formatCurrency(todayRevenue),
                 sub: todaySales.length + ' orders', color: 'emerald' }),
-            !isCashier && React.createElement(StatCard, { icon: '📈', label: 'Weekly Sales', value: formatCurrency(weekRevenue),
-                sub: weekSales.length + ' orders', color: 'violet' }),
-            !isCashier && React.createElement(StatCard, { icon: '📅', label: 'Monthly Sales', value: formatCurrency(monthRevenue),
-                sub: monthSales.length + ' orders', color: 'cyan' }),
-            !isCashier && React.createElement(StatCard, { icon: '🏦', label: 'Total Revenue', value: formatCurrency(totalRevenue), color: 'emerald' }),
             React.createElement(StatCard, { icon: '⚠️', label: 'Low Stock', value: lowStockItems.length,
                 sub: outOfStockItems.length + ' out of stock', color: 'rose' }),
             !isCashier && React.createElement(StatCard, { icon: '🔄', label: 'Recent Sales', value: recentSales.length,
@@ -2100,12 +2095,8 @@ className: `filter-chip ${filter === 'year' ? 'active' : ''}`
 )
 ),
 // Summary
-React.createElement('div', { className: 'grid grid-cols-2 sm:grid-cols-3 gap-3' },
-React.createElement(StatCard, { icon: '📊', label: 'Transactions', value: filteredSales.length, color: 'blue' }),
-React.createElement(StatCard, { icon: '💰', label: 'Revenue', value: formatCurrency(totalFiltered),
-color: 'emerald' }),
-React.createElement(StatCard, { icon: '📈', label: 'Profit', value: formatCurrency(totalProfitFiltered),
-color: 'amber' })
+React.createElement('div', { className: 'grid grid-cols-1 gap-3' },
+React.createElement(StatCard, { icon: '📊', label: 'Transactions', value: filteredSales.length, color: 'blue' })
 ),
 // Search
 React.createElement('input', {
@@ -2465,10 +2456,6 @@ React.createElement('div',{className:'flex flex-wrap gap-2 no-print'},
 React.createElement('input',{type:'date',value:selectedDate,onChange:e=>setSelectedDate(e.target.value),className:'px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white',title:'Choose a day'}),
 React.createElement('button',{onClick:downloadDaySales,className:'btn-primary text-sm'},'⬇ Download Day\'s Sales'))
 ),
-React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-3 gap-3'},
-React.createElement(StatCard,{icon:'💰',label:'Total Revenue',value:formatCurrency(totalRevenue),color:'emerald'}),
-React.createElement(StatCard,{icon:'📈',label:'Gross Profit',value:formatCurrency(totalProfit),color:'amber'}),
-React.createElement(StatCard,{icon:'💸',label:'Total Expenses',value:formatCurrency(totalExpenses),color:'rose'})),
 React.createElement('div',{className:'stat-card p-3 sm:p-5'},
 React.createElement('div',{className:'flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4'},
 React.createElement('div',null,React.createElement('h3',{className:'text-lg font-bold text-gray-800'},'📖 Sales Record'),React.createElement('p',{className:'text-sm text-gray-500'},new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'}))),
@@ -2736,10 +2723,13 @@ React.createElement('button', { onClick: () => backupInputRef.current?.click(), 
 React.createElement('input', { ref: backupInputRef, type: 'file', accept: '.json,application/json', onChange: handleRestore, className: 'hidden' })
 )
 ),
-currentUser && hasSession && currentUser?.role === 'manager' && React.createElement('div', { className: 'stat-card p-4 border border-red-200' },
-React.createElement('p', { className: 'text-sm font-semibold text-red-800 mb-1' }, '⚠️ Manager Reset'),
-React.createElement('p', { className: 'text-xs text-red-600 mb-3' }, 'Permanently clear this shop\'s operational records and start fresh. Your manager account remains.'),
-React.createElement('button', { onClick: handleResetApp, className: 'w-full sm:w-auto px-4 py-2 rounded-lg font-bold text-white bg-red-800 hover:bg-red-900 transition' }, 'RESET WHOLE POS')
+currentUser && hasSession && React.createElement('div', { className: 'manager-reset-card' },
+React.createElement('div', null,
+React.createElement('h3', { className: 'text-base font-bold text-red-900 mb-1' }, '⚠️ Manager Reset'),
+React.createElement('p', { className: 'text-xs text-red-700 mb-2' }, 'Permanently clear this shop\'s operational records and start fresh. Your manager account remains.'),
+currentUser?.role !== 'manager' && React.createElement('p', { className: 'text-xs font-semibold text-red-800' }, '🔒 Manager access required to use Reset.')
+),
+React.createElement('button', { onClick: handleResetApp, disabled: currentUser?.role !== 'manager', className: 'manager-reset-button' }, 'RESET WHOLE POS')
 ),
 React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-1' }, '🔑 Change Password'),
@@ -3094,149 +3084,3 @@ React.createElement(CartSidebar, { isOpen: cartOpen, onClose: () => setCartOpen(
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(React.createElement(AppProvider, null, React.createElement(App)));
 
-/* Manager Reset UI — always visible in Settings for authorized managers */
-function renderManagerResetControl(user) {
-  const role = String(user?.role || user?.user_metadata?.role || user?.app_metadata?.role || '').toLowerCase();
-  const isManager = role === 'manager' || role === 'owner' || role === 'admin';
-  const existing = document.getElementById('manager-reset-control');
-  if (existing) existing.remove();
-  if (!isManager) return;
-
-  const host = document.querySelector('#settings, [data-page="settings"], .settings-page, main');
-  if (!host) return;
-
-  const wrap = document.createElement('section');
-  wrap.id = 'manager-reset-control';
-  wrap.className = 'manager-reset-card';
-  wrap.innerHTML = `
-    <div>
-      <h3>Reset POS</h3>
-      <p>Manager only. This clears operational shop records and starts the POS afresh.</p>
-    </div>
-    <button type="button" id="manager-reset-button" class="manager-reset-button">RESET WHOLE POS</button>
-  `;
-  host.appendChild(wrap);
-
-  document.getElementById('manager-reset-button').addEventListener('click', async () => {
-    const confirmText = window.prompt('Type RESET to permanently clear the shop records.');
-    if (confirmText !== 'RESET') return;
-    const btn = document.getElementById('manager-reset-button');
-    btn.disabled = true;
-    btn.textContent = 'RESETTING…';
-    try {
-      const token = typeof getAccessToken === 'function' ? await getAccessToken() : null;
-      const headers = {'Content-Type':'application/json'};
-      if (token) headers.Authorization = `Bearer ${token}`;
-      const res = await fetch('/api/admin/reset', {method:'POST', headers, body: JSON.stringify({confirmation:'RESET'})});
-      if (!res.ok) throw new Error(`Reset failed (${res.status})`);
-      btn.textContent = 'RESET COMPLETE';
-      setTimeout(()=>window.location.reload(), 900);
-    } catch (e) {
-      console.error(e);
-      btn.disabled = false;
-      btn.textContent = 'RESET WHOLE POS';
-      window.alert('Reset could not be completed. Please check your connection and try again.');
-    }
-  });
-}
-
-/* Hook into common auth/settings render points without replacing existing logic. */
-document.addEventListener('DOMContentLoaded', () => {
-  const currentUser = window.currentUser || window.user || null;
-  if (currentUser) renderManagerResetControl(currentUser);
-  document.addEventListener('settings:opened', () => renderManagerResetControl(window.currentUser || window.user || null));
-});
-
-/* Keep requested dashboard/sales summary cards out of the UI.
-   Product cards are deliberately excluded. */
-function removeRequestedSummaryCards() {
-  const labels = ['Total Revenue','Gross Profit','Total Expenses','Monthly Sales','Weekly Sales'];
-  const nodes = document.querySelectorAll(
-    '.stat-card, .summary-card, .metric-card, .kpi-card, [data-card], .dashboard-card'
-  );
-  nodes.forEach(node => {
-    if (node.classList.contains('product-card')) return;
-    const text = (node.textContent || '').replace(/\s+/g,' ').trim().toLowerCase();
-    if (labels.some(label => text.includes(label.toLowerCase()))) {
-      node.remove();
-    }
-  });
-}
-document.addEventListener('DOMContentLoaded', removeRequestedSummaryCards);
-window.addEventListener('load', removeRequestedSummaryCards);
-
-/* FINAL UI CLEANUP: remove only requested summary cards; NEVER remove product cards. */
-(function(){
-  const unwanted = [
-    'total revenue','gross profit','total expenses',
-    'monthly sales','weekly sales'
-  ];
-  function cleanSummaryCards(){
-    const all = document.querySelectorAll('body *');
-    all.forEach(el=>{
-      if (!el || el.nodeType !== 1) return;
-      if (el.classList && el.classList.contains('product-card')) return;
-      const txt=(el.textContent||'').replace(/\s+/g,' ').trim().toLowerCase();
-      if (!txt || txt.length > 140) return;
-      if (unwanted.some(x=>txt===x || txt.startsWith(x+':') || txt.startsWith(x+' '))) {
-        let card=el;
-        for(let i=0;i<4 && card.parentElement;i++){
-          const p=card.parentElement;
-          const pt=(p.textContent||'').replace(/\s+/g,' ').trim().toLowerCase();
-          if(pt.length<=500 && (p.classList.contains('stat-card')||p.classList.contains('summary-card')||
-             p.classList.contains('metric-card')||p.classList.contains('kpi-card')||p.classList.contains('card'))) {
-            card=p; break;
-          }
-          card=p;
-        }
-        if(card && !card.classList.contains('product-card')) card.remove();
-      }
-    });
-  }
-  document.addEventListener('DOMContentLoaded',cleanSummaryCards);
-  window.addEventListener('load',cleanSummaryCards);
-  setTimeout(cleanSummaryCards,500);
-  setTimeout(cleanSummaryCards,1500);
-})();
-
-/* FINAL MANAGER RESET: deterministic Settings injection */
-(function(){
-  function currentUser(){
-    return window.currentUser || window.user || window.authUser || null;
-  }
-  function roleOf(u){
-    return String(u?.role || u?.user_metadata?.role || u?.app_metadata?.role || '').toLowerCase();
-  }
-  function ensureReset(){
-    const u=currentUser(), role=roleOf(u);
-    if(!['manager','owner','admin'].includes(role)) return;
-    if(document.getElementById('manager-reset-control')) return;
-    const settings = document.querySelector('#settings, [data-page="settings"], .settings-page');
-    if(!settings) return;
-    const el=document.createElement('div');
-    el.id='manager-reset-control';
-    el.className='manager-reset-card';
-    el.innerHTML='<div><h3>Reset POS</h3><p>Manager only — clear operational records and start afresh.</p></div><button id="manager-reset-button" type="button" class="manager-reset-button">RESET WHOLE POS</button>';
-    settings.appendChild(el);
-    el.querySelector('button').onclick=async function(){
-      if(prompt('Type RESET to confirm clearing the POS records.')!=='RESET') return;
-      const b=this; b.disabled=true; b.textContent='RESETTING…';
-      try{
-        let token=null;
-        if(typeof getAccessToken==='function') token=await getAccessToken();
-        const h={'Content-Type':'application/json'}; if(token) h.Authorization='Bearer '+token;
-        const r=await fetch('/api/admin/reset',{method:'POST',headers:h,body:JSON.stringify({confirmation:'RESET'})});
-        if(!r.ok) throw new Error('Reset failed '+r.status);
-        b.textContent='RESET COMPLETE';
-        setTimeout(()=>location.reload(),800);
-      }catch(e){
-        console.error(e); b.disabled=false; b.textContent='RESET WHOLE POS';
-        alert('Reset failed. Check your connection and try again.');
-      }
-    };
-  }
-  document.addEventListener('DOMContentLoaded',ensureReset);
-  window.addEventListener('load',ensureReset);
-  document.addEventListener('settings:opened',ensureReset);
-  setInterval(ensureReset,1000);
-})();
