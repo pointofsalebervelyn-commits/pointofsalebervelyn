@@ -16,32 +16,9 @@ const DB = {
 const API_BASE = window.NEXATILL_API_URL || 'http://localhost:3000';
 const SESSION_KEY = 'nexatill_session';
 
-// Keep the browser's install prompt available so users can install later from Settings.
-let deferredInstallPrompt = null;
-window.addEventListener('beforeinstallprompt', event => {
-    event.preventDefault();
-    deferredInstallPrompt = event;
-    window.dispatchEvent(new Event('nexatill:install-available'));
-});
-window.addEventListener('appinstalled', () => {
-    deferredInstallPrompt = null;
-    window.dispatchEvent(new Event('nexatill:install-complete'));
-});
-window.nexatillInstallPWA = async () => {
-    if (deferredInstallPrompt) {
-        const event = deferredInstallPrompt;
-        deferredInstallPrompt = null;
-        await event.prompt();
-        const choice = await event.userChoice.catch(() => null);
-        window.dispatchEvent(new CustomEvent('nexatill:install-result', { detail: choice?.outcome || 'dismissed' }));
-        return choice?.outcome || 'dismissed';
-    }
-    return 'unavailable';
-};
-
 async function apiRequest(path, options = {}, token = '') {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 45000);
+    const timeout = setTimeout(() => controller.abort(), Number(options.timeoutMs) || 15000);
     let response;
     try {
         response = await fetch(API_BASE + path, {
@@ -58,6 +35,22 @@ async function apiRequest(path, options = {}, token = '') {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: response.status });
     return data;
+}
+
+async function apiRequestWithSession(path, options = {}) {
+    let session = DB.get(SESSION_KEY, null);
+    if (!session?.accessToken) throw Object.assign(new Error('Please sign in again.'), { status: 401 });
+    try {
+        return await apiRequest(path, options, session.accessToken);
+    } catch (error) {
+        if (error.status !== 401 || !session.refreshToken) throw error;
+        const refreshed = await apiRequest('/api/auth/refresh', {
+            method: 'POST', body: JSON.stringify({ refreshToken: session.refreshToken })
+        });
+        DB.set(SESSION_KEY, refreshed);
+        window.dispatchEvent(new CustomEvent('nexatill:session-refreshed', { detail: refreshed }));
+        return apiRequest(path, options, refreshed.accessToken);
+    }
 }
 
 const defaultProducts = [{
@@ -324,8 +317,19 @@ function AppProvider({ children }) {
                         const data = await apiRequest('/api/bootstrap', {}, session.accessToken);
                         setProducts(data.products || []); setGroups(data.groups || []); setQuickSellItems(data.quickSellItems || []); setSales(data.sales || []); setCustomers(data.customers || []); setSuppliers(data.suppliers || []); setExpenses(data.expenses || []); setUsers(data.users || [session.user]); setRegister(data.register || { isOpen: false, openingCash: 0, openedAt: null }); setStockMovements(data.stockMovements || []); setPurchases(data.purchases || []); setAuditLogs(data.auditLogs || []);
                     } catch { logout(); showToast('Session expired. Please sign in again.', 'error'); }
-                } else { logout(); showToast('Session expired. Please sign in again.', 'error'); }
+                } else if (error.status === 401) { logout(); showToast('Your session has expired. Please sign in again.', 'error'); }
+                else { showToast('Could not refresh shop data. Your current screen is still available.', 'error'); }
             });
+    }, []);
+
+    useEffect(() => {
+        const handleRefresh = (event) => {
+            const session = event.detail;
+            if (session?.user) setCurrentUser(session.user);
+            if (session?.company) setCurrentCompany(session.company);
+        };
+        window.addEventListener('nexatill:session-refreshed', handleRefresh);
+        return () => window.removeEventListener('nexatill:session-refreshed', handleRefresh);
     }, []);
 
     // Persist
@@ -564,83 +568,52 @@ function AppProvider({ children }) {
         return payload;
     };
 
-    const completeSale = async (saleData) => {
+    const completeSale = (saleData) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
         const normalizedSale = { ...saleData, clientReference: saleData.clientReference || `sale-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
-        if (token && navigator.onLine && token !== 'local-demo-token') {
-            const submit = () => apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(normalizedSale) }, token);
-            try {
-                let data;
-                try { data = await submit(); }
-                catch (firstError) {
-                    // Retry the exact same clientReference. The server treats it idempotently,
-                    // so a timed-out response cannot create a duplicate sale.
-                    if (firstError?.status >= 400 && firstError?.status !== 408 && firstError?.status !== 429 && firstError?.status !== 502 && firstError?.status !== 503 && firstError?.status !== 504) throw firstError;
-                    data = await submit();
-                }
+        if (token && token !== 'local-demo-token' && navigator.onLine) {
+            return apiRequestWithSession('/api/sales', { method: 'POST', body: JSON.stringify(normalizedSale), timeoutMs: 10000 }).then(data => {
                 setProducts(prev => prev.map(product => {
                     const item = normalizedSale.items.find(line => line.productId === product.id);
                     return item ? { ...product, quantity: Math.max(0, product.quantity - item.quantity) } : product;
                 }));
-                setSales(prev => [...prev, data.sale]);
+                setSales(prev => {
+                    if (prev.some(sale => sale.id === data.sale.id || sale.clientReference === normalizedSale.clientReference)) return prev;
+                    return [...prev, data.sale];
+                });
                 clearCart();
                 showToast('Sale completed! Receipt generated.');
                 return data.sale;
-            } catch (error) {
-                // If connectivity/server response is unavailable, fall through to the local
-                // offline queue using the same clientReference for safe later synchronization.
-                const retryable = !error?.status || [408,429,502,503,504].includes(error.status);
-                if (!retryable) throw error;
-            }
+            }).catch(error => {
+                // A network interruption should not trap checkout indefinitely. Queue the sale locally;
+                // a genuine stock/validation error is shown to the user instead.
+                if (error.status === 409 || error.status === 400) throw error;
+                return queueOfflineSale(normalizedSale);
+            });
         }
-        // Reduce inventory
+        return queueOfflineSale(normalizedSale);
+    };
+
+    const queueOfflineSale = (normalizedSale) => {
         const updatedProducts = products.map(p => {
             const item = normalizedSale.items.find(i => i.productId === p.id);
-            if (item) {
-                return { ...p, quantity: Math.max(0, p.quantity - item.quantity) };
-            }
-            return p;
+            return item ? { ...p, quantity: Math.max(0, Number(p.quantity || 0) - Number(item.quantity || 0)) } : p;
         });
         setProducts(updatedProducts);
         DB.set('products', updatedProducts);
-        setStockMovements(prev => [...prev, ...normalizedSale.items.map(item => ({
-            id: 'm' + Date.now() + item.productId,
-            productId: item.productId,
-            quantity: -Math.round(Number(item.quantity)),
-            reason: 'Sale',
-            date: new Date().toISOString()
-        }))]);
-        const newSale = {
-            id: 's' + Date.now(),
-            ...normalizedSale,
-            date: new Date().toISOString(),
-            saleDate: new Date().toLocaleDateString('en-CA'),
-            syncStatus: 'pending'
-        };
-        const offlineQueue = DB.get('offlineSaleQueue', []);
-        DB.set('offlineSaleQueue', [...offlineQueue, { id: normalizedSale.clientReference, payload: normalizedSale, localSaleId: newSale.id, queuedAt: newSale.date }]);
-        setOfflineQueueVersion(v => v + 1);
-        const updatedSales = [...sales, newSale];
-        setSales(updatedSales);
-        DB.set('sales', updatedSales);
-        logAction('Sale completed', newSale.id);
-        // Update customer
-        if (normalizedSale.customerName) {
-            setCustomers(prev => {
-                const existing = prev.find(c => c.name === normalizedSale.customerName);
-                if (existing) {
-                    return prev.map(c => c.name === normalizedSale.customerName ? { ...c,
-                        lastPurchase: new Date().toISOString(),
-                        totalSpent: (c.totalSpent || 0) + normalizedSale.total,
-                        purchaseCount: (c.purchaseCount || 0) + 1 } : c);
-                }
-                return [...prev, { id: 'c' + Date.now(), name: normalizedSale.customerName,
-                    phone: normalizedSale.customerPhone || '', lastPurchase: new Date().toISOString(),
-                    totalSpent: normalizedSale.total, purchaseCount: 1 }];
-            });
+        const now = new Date().toISOString();
+        const newSale = { id: 's' + Date.now(), ...normalizedSale, date: now, saleDate: new Date().toLocaleDateString('en-CA'), syncStatus: 'pending' };
+        const queue = DB.get('offlineSaleQueue', []);
+        if (!queue.some(item => item.id === normalizedSale.clientReference)) {
+            DB.set('offlineSaleQueue', [...queue, { id: normalizedSale.clientReference, payload: normalizedSale, localSaleId: newSale.id, queuedAt: now }]);
         }
+        setOfflineQueueVersion(v => v + 1);
+        setSales(prev => [...prev, newSale]);
+        DB.set('sales', [...sales, newSale]);
+        setStockMovements(prev => [...prev, ...normalizedSale.items.map(item => ({ id:'m'+Date.now()+item.productId, productId:item.productId, quantity:-Math.round(Number(item.quantity)), reason:'Sale', date:now }))]);
+        logAction('Sale completed offline', newSale.id);
         clearCart();
-        showToast('Sale completed! Receipt generated.');
+        showToast('Sale saved. It will sync when the connection is restored.');
         return newSale;
     };
 
@@ -655,6 +628,16 @@ function AppProvider({ children }) {
                 const data = await apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(item.payload) }, session.accessToken);
                 setSales(prev => prev.map(sale => sale.id === item.localSaleId ? data.sale : sale));
             } catch (error) {
+                if (error.status === 401 && session.refreshToken) {
+                    try {
+                        const refreshed = await apiRequest('/api/auth/refresh', { method:'POST', body:JSON.stringify({ refreshToken:session.refreshToken }) });
+                        DB.set(SESSION_KEY, refreshed);
+                        window.dispatchEvent(new CustomEvent('nexatill:session-refreshed', { detail: refreshed }));
+                        const data = await apiRequest('/api/sales', { method:'POST', body:JSON.stringify(item.payload) }, refreshed.accessToken);
+                        setSales(prev => prev.map(sale => sale.id === item.localSaleId ? data.sale : sale));
+                        continue;
+                    } catch (_) { remaining.push(item); continue; }
+                }
                 if (error.status !== 409) remaining.push(item);
             }
         }
@@ -1305,7 +1288,14 @@ function Dashboard() {
         }
     }, [chartRef, sales]);
 
+    const displayName = String(currentUser?.name || currentUser?.email || 'Shop Owner').trim().split(' ')[0] || 'Shop Owner';
+
     return React.createElement('div', { className: 'space-y-6' },
+        React.createElement('div', { className: 'stat-card p-4 sm:p-5' },
+            React.createElement('p', { className: 'text-xs font-bold uppercase tracking-wide text-blue-600' }, 'KoraPoint'),
+            React.createElement('h2', { className: 'text-xl sm:text-2xl font-bold text-gray-800 mt-1' }, 'Welcome back, ', displayName, '! 👋'),
+            React.createElement('p', { className: 'text-sm text-gray-500 mt-1' }, 'Here is how your shop is doing today.')
+        ),
         // Stats
         React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3' },
             React.createElement(StatCard, { icon: '📦', label: 'Products', value: totalProducts, color: 'amber' }),
@@ -2429,176 +2419,72 @@ React.createElement('button', { onClick: handleSave, className: 'btn-primary' },
 
 // ---- Reports Page ----
 function ReportsPage() {
-const { products, sales, expenses } = useApp();
+const { products, sales, expenses, showToast } = useApp();
 const [reportEmail, setReportEmail] = useState('');
+const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('en-CA'));
 const activeSales = sales.filter(isActiveSale);
-const totalRevenue = activeSales.reduce((sum, s) => sum + s.total, 0);
-const totalProfit = activeSales.reduce((sum, s) => sum + (s.profit || 0), 0);
-const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+const totalRevenue = activeSales.reduce((sum, s) => sum + Number(s.total || 0), 0);
+const totalProfit = activeSales.reduce((sum, s) => sum + Number(s.profit || 0), 0);
+const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 const netProfit = totalProfit - totalExpenses;
-const todayKey = new Date().toLocaleDateString('en-CA');
-const todaySales = activeSales.filter(s => (s.saleDate || new Date(s.date).toLocaleDateString('en-CA')) === todayKey);
-const todayExpenses = expenses.filter(e => e.date === todayKey);
-const closingRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
-const closingProfit = todaySales.reduce((sum, s) => sum + (s.profit || 0), 0);
-const closingExpenses = todayExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
-const paymentTotals = todaySales.reduce((totals, sale) => {
-    const method = sale.paymentMethod || 'Cash';
-    totals[method] = (totals[method] || 0) + sale.total;
-    return totals;
-}, {});
-const cashCollected = todaySales
-    .filter(s => (s.paymentMethod || 'Cash') === 'Cash')
-    .reduce((sum, s) => sum + (Number.isFinite(s.cashReceived) && s.cashReceived > 0 ? s.cashReceived : s.total), 0);
+const selectedSales = activeSales.filter(s => (s.saleDate || new Date(s.date).toLocaleDateString('en-CA')) === selectedDate)
+    .sort((a,b) => new Date(a.date) - new Date(b.date));
+const selectedTotal = selectedSales.reduce((sum, s) => sum + Number(s.total || 0), 0);
+const selectedProfit = selectedSales.reduce((sum, s) => sum + Number(s.profit || 0), 0);
+const selectedRows = selectedSales.flatMap(sale => (sale.items || []).map((item, index) => ({
+    id: `${sale.id}-${index}`, time: new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    customer: sale.customerName || 'Walk-in Customer', item: item.productName || 'Item', qty: Number(item.quantity || 0),
+    price: Number(item.sellingPrice || 0), amount: Number(item.quantity || 0) * Number(item.sellingPrice || 0), saleTotal: Number(sale.total || 0),
+    payment: sale.paymentMethod || 'Cash'
+})))
 
-// Best selling products
-const productSales = {};
-activeSales.forEach(s => {
-s.items.forEach(item => {
-if (!productSales[item.productId]) {
-productSales[item.productId] = { name: item.productName, qty: 0, revenue: 0 };
-}
-productSales[item.productId].qty += item.quantity;
-productSales[item.productId].revenue += item.quantity * item.sellingPrice;
-});
-});
-const bestSellers = Object.values(productSales).sort((a, b) => b.qty - a.qty).slice(0, 5);
-const downloadDailySales = () => {
-    const headers = ['Date', 'Time', 'Receipt', 'Customer', 'Payment Method', 'Items', 'Total'];
-    const rows = todaySales.map(sale => [
-        sale.saleDate || todayKey,
-        new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        sale.id || '',
-        sale.customerName || 'Walk-in Customer',
-        sale.paymentMethod || 'Cash',
-        (sale.items || []).map(i => `${i.productName} x${i.quantity}`).join(' | '),
-        Number(sale.total || 0).toFixed(2)
-    ]);
-    const csv = [headers, ...rows].map(row => row.map(value => `\"${String(value).replaceAll('\"','\"\"')}\"`).join(',')).join('\n');
+const downloadDaySales = () => {
+    if (!selectedSales.length) { showToast('There are no sales for this day.', 'error'); return; }
+    const rows = [['Time','Customer','Item Purchased','Qty','Unit Price (GHS)','Amount (GHS)','Payment Method']];
+    selectedRows.forEach(r => rows.push([r.time,r.customer,r.item,r.qty,r.price.toFixed(2),r.amount.toFixed(2),r.payment]));
+    rows.push([]); rows.push(['','','','','DAY TOTAL',selectedTotal.toFixed(2),'']);
+    const csv = rows.map(row => row.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url; link.download = `KoraPoint-sales-${todayKey}.csv`;
-    document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(blob); const link = document.createElement('a');
+    link.href = url; link.download = `KoraPoint-sales-${selectedDate}.csv`; link.click(); URL.revokeObjectURL(url);
+    showToast(`Sales for ${selectedDate} downloaded`);
 };
+
 const sendDailyReport = async () => {
     const recipient = reportEmail.trim();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
-        showToast('Enter a valid report email address', 'error');
-        return;
-    }
-    const subject = `KoraPoint daily sales report - ${todayKey}`;
-    const body = [
-        `KoraPoint daily sales report for ${todayKey}`,
-        `Revenue: ${formatCurrency(closingRevenue)}`,
-        `Gross profit: ${formatCurrency(closingProfit)}`,
-        `Expenses: ${formatCurrency(closingExpenses)}`,
-        `Cash collected: ${formatCurrency(cashCollected)}`,
-        `Transactions: ${todaySales.length}`
-    ].join('\n');
-    try {
-        const token = DB.get(SESSION_KEY, null)?.accessToken;
-        await apiRequest('/api/reports/email', { method: 'POST', body: JSON.stringify({ recipient, subject, report: body }) }, token);
-        showToast('Daily report sent successfully');
-    } catch (error) {
-        showToast(error.message, 'error');
-    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) { showToast('Enter a valid report email address', 'error'); return; }
+    const body = [`KoraPoint sales report for ${selectedDate}`, `Revenue: ${formatCurrency(selectedTotal)}`, `Gross profit: ${formatCurrency(selectedProfit)}`, `Transactions: ${selectedSales.length}`].join('\n');
+    try { await apiRequestWithSession('/api/reports/email', { method:'POST', body:JSON.stringify({ recipient, subject:`KoraPoint sales report - ${selectedDate}`, report:body }) }); showToast('Daily report sent successfully'); }
+    catch(error) { showToast(error.message, 'error'); }
 };
 
 return React.createElement('div', { className: 'space-y-5' },
-React.createElement('div', { className: 'flex flex-wrap items-center justify-between gap-3' },
-React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, '📊 Reports & Analytics'),
-React.createElement('div', { className: 'flex flex-wrap gap-2 no-print' },
-React.createElement('button', { onClick: () => window.print(), className: 'btn-secondary text-sm' }, '🖨 Save as PDF'),
-React.createElement('input', { type: 'email', value: reportEmail, onChange: e => setReportEmail(e.target.value), placeholder: 'Report email', className: 'px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
-React.createElement('button', { onClick: sendDailyReport, className: 'btn-secondary text-sm' }, '✉ Open email tab')
-)
+React.createElement('div', { className: 'flex flex-col sm:flex-row sm:items-center justify-between gap-3' },
+React.createElement('div', null, React.createElement('h2', { className:'text-xl font-bold text-gray-800' }, '📊 Reports'), React.createElement('p',{className:'text-sm text-gray-500'},'Simple records you can read at a glance.')),
+React.createElement('div',{className:'flex flex-wrap gap-2 no-print'},
+React.createElement('input',{type:'date',value:selectedDate,onChange:e=>setSelectedDate(e.target.value),className:'px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white',title:'Choose a day'}),
+React.createElement('button',{onClick:downloadDaySales,className:'btn-primary text-sm'},'⬇ Download Day\'s Sales'))
 ),
-// Summary cards
-React.createElement('div', { className: 'grid grid-cols-2 sm:grid-cols-3 gap-3' },
-React.createElement(StatCard, { icon: '💰', label: 'Total Revenue', value: formatCurrency(totalRevenue),
-color: 'emerald' }),
-React.createElement(StatCard, { icon: '📈', label: 'Gross Profit', value: formatCurrency(totalProfit),
-color: 'amber' }),
-React.createElement(StatCard, { icon: '💸', label: 'Total Expenses', value: formatCurrency(totalExpenses),
-color: 'rose' }),
-React.createElement(StatCard, { icon: '🏆', label: 'Net Profit', value: formatCurrency(netProfit),
-color: netProfit >= 0 ? 'emerald' : 'rose' }),
-React.createElement(StatCard, { icon: '📋', label: 'Total Sales', value: sales.length, color: 'violet' })
-),
-// Daily closing report
-React.createElement('div', { className: 'stat-card p-4 space-y-3' },
-React.createElement('div', { className: 'flex items-center justify-between gap-2' },
-React.createElement('div', null,
-React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '📅 Today\'s Closing Report'),
-React.createElement('p', { className: 'text-xs text-gray-400' }, todaySales.length, ' transactions')
-),
-React.createElement('span', { className: 'text-lg font-bold text-emerald-600' }, formatCurrency(closingRevenue))
-),
-React.createElement('div', { className: 'grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm' },
-React.createElement('div', { className: 'bg-gray-50 rounded-lg p-2' },
-React.createElement('p', { className: 'text-xs text-gray-400' }, 'Cash collected'),
-React.createElement('p', { className: 'font-semibold text-gray-800' }, formatCurrency(cashCollected))
-),
-React.createElement('div', { className: 'bg-gray-50 rounded-lg p-2' },
-React.createElement('p', { className: 'text-xs text-gray-400' }, 'Mobile Money'),
-React.createElement('p', { className: 'font-semibold text-gray-800' }, formatCurrency(paymentTotals['Mobile Money'] || 0))
-),
-React.createElement('div', { className: 'bg-gray-50 rounded-lg p-2' },
-React.createElement('p', { className: 'text-xs text-gray-400' }, 'Card'),
-React.createElement('p', { className: 'font-semibold text-gray-800' }, formatCurrency(paymentTotals.Card || 0))
-),
-React.createElement('div', { className: 'bg-gray-50 rounded-lg p-2' },
-React.createElement('p', { className: 'text-xs text-gray-400' }, 'Net result'),
-React.createElement('p', { className: `font-semibold ${closingProfit - closingExpenses >= 0 ? 'text-emerald-600' : 'text-rose-600'}` },
-formatCurrency(closingProfit - closingExpenses))
-)
-),
-React.createElement('div', { className: 'flex justify-between text-xs text-gray-500 border-t border-gray-100 pt-2' },
-React.createElement('span', null, 'Gross profit: ', formatCurrency(closingProfit)),
-React.createElement('span', null, 'Expenses: ', formatCurrency(closingExpenses))
-)
-),
-// Entire-day sales table
-React.createElement('div', { className: 'stat-card p-4 daily-sales-report' },
-React.createElement('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-3' },
-React.createElement('div', null,
-React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '🧾 Today’s Sales'),
-React.createElement('p', { className: 'text-xs text-gray-400' }, todaySales.length, ' transactions')
-),
-React.createElement('button', { onClick: downloadDailySales, className: 'btn-primary text-sm', disabled: !todaySales.length }, '⬇ Download Day’s Sales')
-),
-todaySales.length === 0 ? React.createElement('p', { className: 'text-sm text-gray-400 py-5 text-center' }, 'No sales recorded today.') :
-React.createElement('div', { className: 'daily-sales-table-wrap' },
-React.createElement('table', { className: 'daily-sales-table w-full text-sm' },
-React.createElement('thead', null, React.createElement('tr', null, ['Time','Receipt','Customer','Payment','Items','Total'].map(h => React.createElement('th', { key: h, className: 'text-left px-3 py-2' }, h)))),
-React.createElement('tbody', null, todaySales.slice().reverse().map(sale => React.createElement('tr', { key: sale.id },
-React.createElement('td', { className: 'px-3 py-2 whitespace-nowrap' }, new Date(sale.date).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})),
-React.createElement('td', { className: 'px-3 py-2 whitespace-nowrap font-medium' }, sale.id),
-React.createElement('td', { className: 'px-3 py-2' }, sale.customerName || 'Walk-in Customer'),
-React.createElement('td', { className: 'px-3 py-2 whitespace-nowrap' }, sale.paymentMethod || 'Cash'),
-React.createElement('td', { className: 'px-3 py-2 min-w-[220px]' }, (sale.items || []).map(i => `${i.productName} ×${i.quantity}`).join(', ')),
-React.createElement('td', { className: 'px-3 py-2 whitespace-nowrap font-bold' }, formatCurrency(sale.total))
-)))
-)
-)
-),
-// Best sellers
-React.createElement('div', { className: 'stat-card p-4' },
-React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' }, '🏆 Best Selling Products'),
-bestSellers.length === 0 ?
-React.createElement('p', { className: 'text-sm text-gray-400' }, 'No sales data yet') :
-bestSellers.map((item, i) =>
-React.createElement('div', { key: i, className: 'flex justify-between items-center py-1.5 border-b border-gray-50' },
-React.createElement('span', { className: 'text-sm text-gray-700' },
-'#', i + 1, ' ', item.name
-),
-React.createElement('span', { className: 'text-sm font-medium text-amber-600' },
- item.qty, ' sold • ', formatCurrency(item.revenue)
-)
-)
-)
-)
+React.createElement('div',{className:'grid grid-cols-2 sm:grid-cols-3 gap-3'},
+React.createElement(StatCard,{icon:'💰',label:'Total Revenue',value:formatCurrency(totalRevenue),color:'emerald'}),
+React.createElement(StatCard,{icon:'📈',label:'Gross Profit',value:formatCurrency(totalProfit),color:'amber'}),
+React.createElement(StatCard,{icon:'💸',label:'Total Expenses',value:formatCurrency(totalExpenses),color:'rose'})),
+React.createElement('div',{className:'stat-card p-3 sm:p-5'},
+React.createElement('div',{className:'flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4'},
+React.createElement('div',null,React.createElement('h3',{className:'text-lg font-bold text-gray-800'},'📖 Sales Record'),React.createElement('p',{className:'text-sm text-gray-500'},new Date(`${selectedDate}T12:00:00`).toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'}))),
+React.createElement('div',{className:'text-right'},React.createElement('p',{className:'text-xs text-gray-400'},selectedSales.length,' sale',selectedSales.length===1?'':'s'),React.createElement('p',{className:'text-lg font-bold text-blue-800'},formatCurrency(selectedTotal)))),
+React.createElement('div',{className:'overflow-x-auto rounded-lg border border-gray-200'},
+React.createElement('table',{className:'w-full text-sm min-w-[720px]'},
+React.createElement('thead',{className:'bg-blue-50 text-blue-900'},React.createElement('tr',null,
+['Time','Customer Name','Item Purchased','Qty','Price','Amount','Payment'].map(h=>React.createElement('th',{key:h,className:'px-3 py-3 text-left font-bold'},h)))),
+React.createElement('tbody',null,
+selectedRows.length===0 ? React.createElement('tr',null,React.createElement('td',{colSpan:7,className:'px-4 py-10 text-center text-gray-400'},'No sales recorded for this day.')) : selectedRows.map(row=>React.createElement('tr',{key:row.id,className:'border-t border-gray-100 hover:bg-blue-50/40'},
+React.createElement('td',{className:'px-3 py-3 whitespace-nowrap text-gray-500'},row.time),React.createElement('td',{className:'px-3 py-3 font-medium text-gray-800'},row.customer),React.createElement('td',{className:'px-3 py-3 text-gray-700'},row.item),React.createElement('td',{className:'px-3 py-3'},row.qty),React.createElement('td',{className:'px-3 py-3'},formatCurrency(row.price)),React.createElement('td',{className:'px-3 py-3 font-semibold'},formatCurrency(row.amount)),React.createElement('td',{className:'px-3 py-3 text-gray-500'},row.payment)))),
+React.createElement('tfoot',null,React.createElement('tr',{className:'border-t-2 border-blue-200 bg-blue-50'},React.createElement('td',{colSpan:5,className:'px-3 py-3 text-right font-bold text-blue-900'},'DAY TOTAL'),React.createElement('td',{className:'px-3 py-3 font-extrabold text-lg text-blue-900'},formatCurrency(selectedTotal)),React.createElement('td',{className:'px-3 py-3'})))
+)),
+React.createElement('div',{className:'mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-gray-500'},React.createElement('span',null,'Gross profit: ',formatCurrency(selectedProfit)),React.createElement('span',null,'Choose another date above to view another day.'))),
+React.createElement('div',{className:'stat-card p-4'},React.createElement('div',{className:'flex flex-col sm:flex-row gap-2'},React.createElement('input',{type:'email',value:reportEmail,onChange:e=>setReportEmail(e.target.value),placeholder:'Report email',className:'flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm'}),React.createElement('button',{onClick:sendDailyReport,className:'btn-secondary text-sm'},'✉ Email Selected Day'))),
+React.createElement('div',{className:'stat-card p-4'},React.createElement('p',{className:'text-sm font-semibold text-gray-700'},'📈 Business Summary'),React.createElement('p',{className:'text-sm text-gray-500 mt-1'},'Net profit: ',React.createElement('strong',{className:netProfit>=0?'text-emerald-600':'text-rose-600'},formatCurrency(netProfit))))
 );
 }
 
@@ -2754,6 +2640,19 @@ reader.readAsText(file);
 event.target.value = '';
 };
 
+const handleResetApp = async () => {
+if (currentUser?.role !== 'manager') { showToast('Only a manager can reset the whole POS.', 'error'); return; }
+const phrase = window.prompt('This will permanently clear this shop\'s sales, stock, products, expenses and records. Type RESET to continue.');
+if (phrase !== 'RESET') { if (phrase !== null) showToast('Reset cancelled', 'info'); return; }
+try {
+    await apiRequestWithSession('/api/admin/reset', { method:'POST' });
+    localStorage.removeItem('nexatill_offlineSaleQueue');
+    ['products','sales','customers','suppliers','expenses','stockMovements','purchases','auditLogs','parkedCarts','heldSales','groups','quickSellItems'].forEach(k=>DB.set(k, []));
+    showToast('POS reset successfully. Reloading...');
+    setTimeout(()=>window.location.reload(),700);
+} catch(error) { showToast(error.message || 'Reset failed', 'error'); }
+};
+
 const startTour = () => window.dispatchEvent(new Event('nexatill:start-tour'));
 
 if (isLogin || !currentUser || !hasSession) {
@@ -2828,21 +2727,6 @@ React.createElement('p', { className: 'text-xs text-gray-400' }, 'Review the mai
 ),
 React.createElement('button', { onClick: startTour, className: 'btn-secondary text-sm whitespace-nowrap' }, 'Start Tour')
 ),
-React.createElement('div', { className: 'stat-card p-4 install-card' },
-React.createElement('div', { className: 'flex items-center justify-between gap-3' },
-React.createElement('div', null,
-React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '📲 Install KoraPoint'),
-React.createElement('p', { className: 'text-xs text-gray-400 mt-1' }, 'Install the POS on this device for faster access and an app-like experience.')
-),
-React.createElement('button', { className: 'btn-primary text-sm whitespace-nowrap', onClick: async () => {
-    const result = await window.nexatillInstallPWA?.();
-    if (result === 'accepted') showToast('KoraPoint installed successfully');
-    else if (result === 'dismissed') showToast('No problem — you can install KoraPoint later from Settings.', 'info');
-    else if (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone) showToast('KoraPoint is already installed', 'info');
-    else showToast('Install is not available yet. On your browser, use the browser menu and choose “Install app” or “Add to Home screen”.', 'info');
-} }, 'Install App')
-)
-),
 React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-1' }, '💾 Data Protection'),
 React.createElement('p', { className: 'text-xs text-gray-400 mb-3' }, 'Keep a copy of your products, sales, expenses, and settings.'),
@@ -2852,7 +2736,12 @@ React.createElement('button', { onClick: () => backupInputRef.current?.click(), 
 React.createElement('input', { ref: backupInputRef, type: 'file', accept: '.json,application/json', onChange: handleRestore, className: 'hidden' })
 )
 ),
-currentUser && hasSession && React.createElement('div', { className: 'stat-card p-4' },
+currentUser && hasSession && currentUser?.role === 'manager' && React.createElement('div', { className: 'stat-card p-4 border border-red-200' },
+React.createElement('p', { className: 'text-sm font-semibold text-red-800 mb-1' }, '⚠️ Manager Reset'),
+React.createElement('p', { className: 'text-xs text-red-600 mb-3' }, 'Permanently clear this shop\'s operational records and start fresh. Your manager account remains.'),
+React.createElement('button', { onClick: handleResetApp, className: 'w-full sm:w-auto px-4 py-2 rounded-lg font-bold text-white bg-red-800 hover:bg-red-900 transition' }, 'RESET WHOLE POS')
+),
+React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-1' }, '🔑 Change Password'),
 React.createElement('p', { className: 'text-xs text-gray-400 mb-3' }, 'Use a new password with at least 12 characters.'),
 React.createElement('div', { className: 'grid gap-3 sm:grid-cols-3' },
@@ -3022,14 +2911,11 @@ const navItems = [
 { id: 'sell', label: 'Sell', icon: '🛒' },
 { id: 'products', label: 'Stock', icon: '📦' },
 { id: 'sales', label: 'Sales', icon: '🧾' },
-{ id: 'customers', label: 'Customers', icon: '👥' },
 { id: 'expenses', label: 'Expenses', icon: '💰' },
 { id: 'reports', label: 'Reports', icon: '📊' },
 { id: 'settings', label: 'Settings', icon: '⚙️' },
 ].filter(item => !isCashier || !restrictedPages.includes(item.id));
 const moreItems = [
-{ id: 'customers', label: 'Customers', icon: '👥' },
-{ id: 'suppliers', label: 'Suppliers', icon: '🏢' },
 { id: 'expenses', label: 'Expenses', icon: '💰' },
 { id: 'reports', label: 'Reports', icon: '📊' },
 { id: 'stockActivity', label: 'Stock Activity', icon: '📦' },
@@ -3050,12 +2936,8 @@ case 'products':
 return React.createElement(ProductsPage);
 case 'sales':
 return React.createElement(SalesPage);
-case 'customers':
-return React.createElement(CustomersPage);
 case 'stockActivity':
 return React.createElement(StockActivityPage);
-case 'suppliers':
-return React.createElement(SuppliersPage);
 case 'expenses':
 return React.createElement(ExpensesPage);
 case 'reports':
@@ -3171,10 +3053,6 @@ React.createElement('div', { className: 'flex min-h-screen' },
 React.createElement(DesktopSidebar),
 React.createElement(MobileNav),
 React.createElement('main', { className: 'flex-1 p-3 sm:p-5 lg:p-6 max-w-7xl mx-auto w-full' },
-React.createElement('div', { className: 'mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3' },
-React.createElement('p', { className: 'text-sm font-semibold text-amber-900' }, 'Welcome back, ', currentUser.name, '!'),
-React.createElement('p', { className: 'text-xs text-amber-700 mt-0.5' }, currentCompany?.name || 'Your company', ' workspace')
-),
 React.createElement('div', { className: 'mb-4 flex items-center justify-between' },
 React.createElement('div', null,
 React.createElement('h1', { className: 'text-2xl font-bold text-gray-800 hidden lg:block' },

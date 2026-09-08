@@ -1237,18 +1237,17 @@ body{background:radial-gradient(circle at 5% 0%,rgba(23,105,170,.13),transparent
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}}
 
-/* Final UX fixes */
-.offline-banner { position: sticky !important; top: 0 !important; z-index: 15 !important; }
-.mobile-nav { z-index: 65 !important; }
-.mobile-bottom-nav { z-index: 40 !important; }
-.daily-sales-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid rgba(23,105,170,.10); border-radius:12px; }
-.daily-sales-table { min-width:760px; border-collapse:collapse; }
-.daily-sales-table th { background:#eef7ff; color:#0f4c81; font-weight:700; }
-.daily-sales-table td { border-top:1px solid #eef2f7; vertical-align:top; }
-@media (max-width:639px) {
-  body { padding-bottom:78px !important; }
-  .mobile-bottom-nav { padding-bottom:calc(9px + env(safe-area-inset-bottom)); }
-  .mobile-nav { padding-bottom:calc(80px + env(safe-area-inset-bottom)); overflow-y:auto; }
-  .offline-banner { font-size:.70rem; line-height:1.25; padding:6px 10px; }
-  .install-card > div { align-items:flex-start; }
+
+/* Final responsive/report polish */
+@media (max-width: 640px) {
+  main { padding-bottom: 88px !important; }
+  .mobile-bottom-nav { z-index: 25 !important; }
+  .mobile-nav { z-index: 60 !important; }
+  .offline-banner, .sync-banner { position: sticky !important; top: 0 !important; z-index: 18 !important; margin: 0 12px 8px !important; border-radius: 10px !important; }
+  .stat-card { min-width: 0; }
+}
+@media (max-width: 380px) {
+  main { padding-left: 10px !important; padding-right: 10px !important; }
+  .mobile-bottom-nav button { min-width: 0 !important; padding-left: 5px !important; padding-right: 5px !important; }
+  .mobile-bottom-nav span:last-child { font-size: 10px !important; }
 }

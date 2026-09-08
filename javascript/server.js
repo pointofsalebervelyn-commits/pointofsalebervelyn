@@ -338,6 +338,31 @@ app.get('/api/suppliers', requireAuth, async (req, res, next) => { try { const r
 app.post('/api/suppliers', requireAuth, async (req, res, next) => { try { const result = await pool.query('INSERT INTO suppliers (tenant_id,name,contact,phone) VALUES ($1,$2,$3,$4) RETURNING id,name,contact,phone', [req.user.tenant_id, req.body.name, req.body.contact || '', req.body.phone || '']); res.status(201).json({ supplier: result.rows[0] }); } catch (error) { next(error); } });
 app.patch('/api/suppliers/:id', requireAuth, async (req, res, next) => { try { const result = await pool.query('UPDATE suppliers SET name=COALESCE($1,name),contact=COALESCE($2,contact),phone=COALESCE($3,phone) WHERE id=$4 AND tenant_id=$5 RETURNING id,name,contact,phone', [req.body.name, req.body.contact, req.body.phone, req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'Supplier not found' }); res.json({ supplier: result.rows[0] }); } catch (error) { next(error); } });
 app.delete('/api/suppliers/:id', requireAuth, async (req, res, next) => { try { await pool.query('DELETE FROM suppliers WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user.tenant_id]); res.status(204).end(); } catch (error) { next(error); } });
+app.post('/api/admin/reset', requireAuth, async (req, res, next) => {
+    if (req.user.role !== 'manager') return res.status(403).json({ error: 'Only a manager can reset the whole POS' });
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const tenantId = req.user.tenant_id;
+        await client.query('DELETE FROM quick_sell_items WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM product_groups WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM held_sales WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM stock_movements WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM purchases WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM sales WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM customers WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM suppliers WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM expenses WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM products WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM registers WHERE tenant_id=$1', [tenantId]);
+        await client.query('DELETE FROM audit_logs WHERE tenant_id=$1', [tenantId]);
+        await addAudit(client, tenantId, req.user.id, 'POS reset', 'Manager reset the shop and cleared operational data');
+        await client.query('COMMIT');
+        res.json({ ok: true });
+    } catch (error) { await client.query('ROLLBACK'); next(error); }
+    finally { client.release(); }
+});
+
 app.get('/api/users', requireAuth, requireStaffAdmin, async (req, res, next) => { try { const result = await pool.query(`${userSelect} WHERE tenant_id=$1 AND is_active = true ORDER BY created_at`, [req.user.tenant_id]); res.json({ users: result.rows }); } catch (error) { next(error); } });
 app.post('/api/users', requireAuth, requireStaffAdmin, async (req, res, next) => {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
