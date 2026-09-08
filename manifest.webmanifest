@@ -2,12 +2,12 @@
   "name": "KoraPoint POS",
   "short_name": "KoraPoint",
   "description": "KoraPoint hardware shop point-of-sale",
-  "start_url": "/",
+  "start_url": "/html/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f4f8ff",
   "theme_color": "#1769aa",
-  "id": "/",
+  "id": "/html/",
   "orientation": "portrait-primary",
   "icons": [
     {

@@ -339,7 +339,7 @@ app.post('/api/suppliers', requireAuth, async (req, res, next) => { try { const 
 app.patch('/api/suppliers/:id', requireAuth, async (req, res, next) => { try { const result = await pool.query('UPDATE suppliers SET name=COALESCE($1,name),contact=COALESCE($2,contact),phone=COALESCE($3,phone) WHERE id=$4 AND tenant_id=$5 RETURNING id,name,contact,phone', [req.body.name, req.body.contact, req.body.phone, req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'Supplier not found' }); res.json({ supplier: result.rows[0] }); } catch (error) { next(error); } });
 app.delete('/api/suppliers/:id', requireAuth, async (req, res, next) => { try { await pool.query('DELETE FROM suppliers WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user.tenant_id]); res.status(204).end(); } catch (error) { next(error); } });
 app.post('/api/admin/reset', requireAuth, async (req, res, next) => {
-    if (req.user.role !== 'manager') return res.status(403).json({ error: 'Only a manager can reset the whole POS' });
+    if (!['owner', 'manager'].includes(req.user.role)) return res.status(403).json({ error: 'Only the owner or a manager can reset the whole POS' });
     const client = await pool.connect();
     try {
         await client.query('BEGIN');

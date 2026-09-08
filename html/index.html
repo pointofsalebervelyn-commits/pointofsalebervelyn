@@ -23,11 +23,10 @@
     <div id="root"></div>
 
     <!-- Your main application JavaScript -->
-    <script src="../javascript/app.js?v=5"></script>
+    <script src="../javascript/app.js?v=6"></script>
     <script>
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => navigator.serviceWorker.register('../javascript/sw.js?v=5'));
+            window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js?v=6', { scope: '/' }));
         }
-    </script>
 </body>
 </html>

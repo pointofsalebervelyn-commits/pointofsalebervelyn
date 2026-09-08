@@ -1684,8 +1684,8 @@ function ProductForm({ product, onClose, mode }) {
         category: selectedProduct?.category || 'Cement',
         materialType: selectedProduct?.materialType || '',
         supplier: selectedProduct?.supplier || '',
-        buyingPrice: (selectedProduct && Number(selectedProduct.buyingPrice) > 0) ? selectedProduct.buyingPrice : '',
-        sellingPrice: (selectedProduct && Number(selectedProduct.sellingPrice) > 0) ? selectedProduct.sellingPrice : '',
+        buyingPrice: (Number(selectedProduct?.buyingPrice) > 0 ? String(selectedProduct.buyingPrice) : ''),
+        sellingPrice: (Number(selectedProduct?.sellingPrice) > 0 ? String(selectedProduct.sellingPrice) : ''),
         quantity: Math.round(Number(selectedProduct?.quantity ?? 0)),
         minStockLevel: Math.round(Number(selectedProduct?.minStockLevel ?? 5)),
         unit: selectedProduct?.unit || 'piece',
@@ -1740,11 +1740,13 @@ function ProductForm({ product, onClose, mode }) {
         e.preventDefault();
         if (saving) return;
         if (!form.name.trim()) { showToast('Product name is required', 'error'); return; }
-        if ((form.buyingPrice !== '' && Number(form.buyingPrice) < 0) || Number(form.sellingPrice) <= 0 || Number(form.quantity) < 0 || Number(form.minStockLevel) < 0) {
+        const buyingPrice = form.buyingPrice === '' ? null : Number(form.buyingPrice);
+        const sellingPrice = form.sellingPrice === '' ? 0 : Number(form.sellingPrice);
+        if ((buyingPrice !== null && (!Number.isFinite(buyingPrice) || buyingPrice < 0)) || !Number.isFinite(sellingPrice) || sellingPrice <= 0 || form.quantity < 0 || form.minStockLevel < 0) {
             showToast('Enter valid prices and stock quantities', 'error');
             return;
         }
-        const data = { ...form, buyingPrice: form.buyingPrice === '' ? 0 : Number(form.buyingPrice), sellingPrice: Number(form.sellingPrice) };
+        const data = { ...form, buyingPrice: buyingPrice === null ? 0 : buyingPrice, sellingPrice };
         setSaving(true);
         try {
             if (mode === 'add') await addProduct(data);
@@ -1874,9 +1876,9 @@ function ProductForm({ product, onClose, mode }) {
                     type: 'number',
                     step: '0.01',
                     value: form.buyingPrice,
-                    placeholder: 'e.g. 85.00',
-                    onChange: (e) => setForm(prev => ({ ...prev, buyingPrice: e.target.value === '' ? '' : Number(e.target.value) })),
-                    className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm'
+                    onChange: (e) => setForm(prev => ({ ...prev, buyingPrice: e.target.value })),
+                    className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
+                    placeholder: 'e.g. 85.00'
                 })
             ),
             React.createElement('div', null,
@@ -1886,9 +1888,9 @@ function ProductForm({ product, onClose, mode }) {
                     type: 'number',
                     step: '0.01',
                     value: form.sellingPrice,
-                    placeholder: 'e.g. 100.00',
-                    onChange: (e) => setForm(prev => ({ ...prev, sellingPrice: e.target.value === '' ? '' : Number(e.target.value) })),
+                    onChange: (e) => setForm(prev => ({ ...prev, sellingPrice: e.target.value })),
                     className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
+                    placeholder: 'e.g. 100.00',
                     required: true
                 })
             ),
@@ -2596,7 +2598,7 @@ setShowAdd(false);
 };
 
 const handleDeleteUser = async (id) => {
-if (currentUser?.role !== 'owner') { showToast('Only the owner can revoke user access', 'error'); return; }
+if (currentUser?.role !== 'owner') { showToast('Only the business owner can revoke user access', 'error'); return; }
 if (id === currentUser?.id) { showToast('Cannot delete yourself', 'error'); return; }
 if (window.confirm('Delete this user?')) {
 const mutation = apiMutation(`/api/users/${id}`, 'DELETE', undefined, 'User removed');
@@ -2628,7 +2630,7 @@ event.target.value = '';
 };
 
 const handleResetApp = async () => {
-if (currentUser?.role !== 'manager') { showToast('Only a manager can reset the whole POS.', 'error'); return; }
+if (!['owner', 'manager'].includes(currentUser?.role)) { showToast('Only the owner or a manager can reset the whole POS.', 'error'); return; }
 const phrase = window.prompt('This will permanently clear this shop\'s sales, stock, products, expenses and records. Type RESET to continue.');
 if (phrase !== 'RESET') { if (phrase !== null) showToast('Reset cancelled', 'info'); return; }
 try {
@@ -2693,8 +2695,8 @@ React.createElement('div', { className: 'login-visual-footer' }, 'A calmer way t
 }
 
 
-return React.createElement('div', { className: 'settings-page-layout' },
-React.createElement('div', { className: 'flex items-center justify-between' },
+return React.createElement('div', { className: 'settings-page' },
+React.createElement('div', { className: 'settings-header flex items-center justify-between' },
 React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, '⚙️ Settings'),
 React.createElement('button', {
 onClick: handleLogout,
@@ -2719,7 +2721,8 @@ onClick: async () => {
     showToast(/iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'On iPhone/iPad: tap Share, then Add to Home Screen.' : 'Open your browser menu and choose Install KoraPoint or Add to Home screen.', 'info');
   }
 }
-}, 'INSTALL APP'),
+}, 'INSTALL APP')
+),
 React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm text-gray-600' },
 'Logged in as ', React.createElement('span', { className: 'font-semibold' }, currentUser.name),
@@ -2744,11 +2747,11 @@ React.createElement('input', { ref: backupInputRef, type: 'file', accept: '.json
 ),
 currentUser && hasSession && React.createElement('div', { className: 'manager-reset-card' },
 React.createElement('div', null,
-React.createElement('h3', { className: 'text-base font-bold text-red-900 mb-1' }, '⚠️ Manager Reset'),
+React.createElement('h3', { className: 'text-base font-bold text-red-900 mb-1' }, '⚠️ Owner / Manager Reset'),
 React.createElement('p', { className: 'text-xs text-red-700 mb-2' }, 'Permanently clear this shop\'s operational records and start fresh. Your manager account remains.'),
-currentUser?.role !== 'manager' && React.createElement('p', { className: 'text-xs font-semibold text-red-800' }, '🔒 Manager access required to use Reset.')
+!['owner', 'manager'].includes(currentUser?.role) && React.createElement('p', { className: 'text-xs font-semibold text-red-800' }, '🔒 Owner or manager access required to use Reset.')
 ),
-React.createElement('button', { onClick: handleResetApp, disabled: currentUser?.role !== 'manager', className: 'manager-reset-button' }, 'RESET WHOLE POS')
+React.createElement('button', { onClick: handleResetApp, disabled: !['owner', 'manager'].includes(currentUser?.role), className: 'manager-reset-button' }, 'RESET WHOLE POS')
 ),
 React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-1' }, '🔑 Change Password'),
@@ -2784,7 +2787,7 @@ React.createElement('p', null, '8. Each company sees only its own workspace.')
 ),
 ['owner', 'manager'].includes(currentUser?.role) && React.createElement('div', { className: 'flex items-center justify-between' },
 React.createElement('h3', { className: 'font-semibold text-gray-700' }, '👥 Users'),
-React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Owner: full access + user access control · Manager: shop operations + staff · Cashier: selling and checkout only.'),
+React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Owner: full access · Manager: shop operations + staff · Cashier: selling and checkout only.'),
 React.createElement('button', {
 onClick: () => setShowAdd(true),
 className: 'btn-primary text-sm'
@@ -2849,7 +2852,7 @@ React.createElement('button', { onClick: handleAddUser, className: 'btn-primary'
 )
 )
 )
-));
+);
 }
 
 // ---- Guided Tour ----
