@@ -1333,3 +1333,6 @@ body{background:radial-gradient(circle at 5% 0%,rgba(23,105,170,.13),transparent
   .manager-reset-card{margin:18px 0!important;padding:16px!important;display:flex!important;flex-direction:column!important;align-items:stretch!important}
   .manager-reset-button{width:100%!important;min-height:48px!important}
 }
+
+.pwa-install-card{border:1px solid rgba(23,105,170,.16)!important;background:linear-gradient(135deg,#fff,#f5fbff)!important}
+.pwa-installed-badge{display:inline-flex;align-items:center;padding:9px 12px;border-radius:999px;background:#e7f7f4;color:#0f766e;font-size:12px;font-weight:800}

@@ -3084,3 +3084,50 @@ React.createElement(CartSidebar, { isOpen: cartOpen, onClose: () => setCartOpen(
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(React.createElement(AppProvider, null, React.createElement(App)));
 
+
+// ---- PWA Install support ----
+window.koraInstallPrompt = window.koraInstallPrompt || null;
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  window.koraInstallPrompt = event;
+  window.dispatchEvent(new Event('kora:pwa-install-ready'));
+});
+window.addEventListener('appinstalled', () => {
+  window.koraInstallPrompt = null;
+  window.dispatchEvent(new Event('kora:pwa-installed'));
+});
+
+function KoraPWAInstallCard() {
+  const [available, setAvailable] = React.useState(Boolean(window.koraInstallPrompt));
+  const [installed, setInstalled] = React.useState(window.matchMedia?.('(display-mode: standalone)').matches || false);
+  React.useEffect(() => {
+    const ready = () => setAvailable(true);
+    const done = () => { setAvailable(false); setInstalled(true); };
+    window.addEventListener('kora:pwa-install-ready', ready);
+    window.addEventListener('kora:pwa-installed', done);
+    return () => {
+      window.removeEventListener('kora:pwa-install-ready', ready);
+      window.removeEventListener('kora:pwa-installed', done);
+    };
+  }, []);
+  const install = async () => {
+    if (!window.koraInstallPrompt) {
+      alert('If Install App is not offered by your browser, open the browser menu and choose “Install KoraPoint” or “Add to Home screen”.');
+      return;
+    }
+    const prompt = window.koraInstallPrompt;
+    window.koraInstallPrompt = null;
+    try { await prompt.prompt(); await prompt.userChoice; } catch (e) { console.warn('PWA install prompt failed', e); }
+    setAvailable(false);
+  };
+  return React.createElement('div', { className: 'stat-card p-4 pwa-install-card' },
+    React.createElement('div', { className: 'flex items-center justify-between gap-3 flex-wrap' },
+      React.createElement('div', null,
+        React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '📲 Install KoraPoint'),
+        React.createElement('p', { className: 'text-xs text-gray-400 mt-1' }, installed ? 'KoraPoint is installed on this device.' : 'Install the POS for faster access like an app.')
+      ),
+      installed ? React.createElement('span', { className: 'pwa-installed-badge' }, '✓ Installed') :
+      React.createElement('button', { onClick: install, className: 'btn-primary text-sm whitespace-nowrap' }, 'Install App')
+    )
+  );
+}

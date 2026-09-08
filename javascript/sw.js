@@ -1,4 +1,4 @@
-const CACHE_NAME = 'korapoint-shell-v3';
+const CACHE_NAME = 'korapoint-shell-v4';
 const APP_SHELL = [
   '../html/',
   '../html/index.html',
