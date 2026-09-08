@@ -16,6 +16,29 @@ const DB = {
 const API_BASE = window.NEXATILL_API_URL || 'http://localhost:3000';
 const SESSION_KEY = 'nexatill_session';
 
+// Keep the browser's install prompt available so users can install later from Settings.
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', event => {
+    event.preventDefault();
+    deferredInstallPrompt = event;
+    window.dispatchEvent(new Event('nexatill:install-available'));
+});
+window.addEventListener('appinstalled', () => {
+    deferredInstallPrompt = null;
+    window.dispatchEvent(new Event('nexatill:install-complete'));
+});
+window.nexatillInstallPWA = async () => {
+    if (deferredInstallPrompt) {
+        const event = deferredInstallPrompt;
+        deferredInstallPrompt = null;
+        await event.prompt();
+        const choice = await event.userChoice.catch(() => null);
+        window.dispatchEvent(new CustomEvent('nexatill:install-result', { detail: choice?.outcome || 'dismissed' }));
+        return choice?.outcome || 'dismissed';
+    }
+    return 'unavailable';
+};
+
 async function apiRequest(path, options = {}, token = '') {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 45000);
@@ -541,18 +564,35 @@ function AppProvider({ children }) {
         return payload;
     };
 
-    const completeSale = (saleData) => {
+    const completeSale = async (saleData) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
         const normalizedSale = { ...saleData, clientReference: saleData.clientReference || `sale-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
-        if (token && navigator.onLine) { return apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(normalizedSale) }, token).then(data => {
-            setProducts(prev => prev.map(product => {
-                const item = normalizedSale.items.find(line => line.productId === product.id);
-                return item ? { ...product, quantity: Math.max(0, product.quantity - item.quantity) } : product;
-            }));
-            setSales(prev => [...prev, data.sale]);
-            clearCart();
-            showToast('Sale completed! Receipt generated.');
-        }); }
+        if (token && navigator.onLine && token !== 'local-demo-token') {
+            const submit = () => apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(normalizedSale) }, token);
+            try {
+                let data;
+                try { data = await submit(); }
+                catch (firstError) {
+                    // Retry the exact same clientReference. The server treats it idempotently,
+                    // so a timed-out response cannot create a duplicate sale.
+                    if (firstError?.status >= 400 && firstError?.status !== 408 && firstError?.status !== 429 && firstError?.status !== 502 && firstError?.status !== 503 && firstError?.status !== 504) throw firstError;
+                    data = await submit();
+                }
+                setProducts(prev => prev.map(product => {
+                    const item = normalizedSale.items.find(line => line.productId === product.id);
+                    return item ? { ...product, quantity: Math.max(0, product.quantity - item.quantity) } : product;
+                }));
+                setSales(prev => [...prev, data.sale]);
+                clearCart();
+                showToast('Sale completed! Receipt generated.');
+                return data.sale;
+            } catch (error) {
+                // If connectivity/server response is unavailable, fall through to the local
+                // offline queue using the same clientReference for safe later synchronization.
+                const retryable = !error?.status || [408,429,502,503,504].includes(error.status);
+                if (!retryable) throw error;
+            }
+        }
         // Reduce inventory
         const updatedProducts = products.map(p => {
             const item = normalizedSale.items.find(i => i.productId === p.id);
@@ -2423,6 +2463,24 @@ productSales[item.productId].revenue += item.quantity * item.sellingPrice;
 });
 });
 const bestSellers = Object.values(productSales).sort((a, b) => b.qty - a.qty).slice(0, 5);
+const downloadDailySales = () => {
+    const headers = ['Date', 'Time', 'Receipt', 'Customer', 'Payment Method', 'Items', 'Total'];
+    const rows = todaySales.map(sale => [
+        sale.saleDate || todayKey,
+        new Date(sale.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        sale.id || '',
+        sale.customerName || 'Walk-in Customer',
+        sale.paymentMethod || 'Cash',
+        (sale.items || []).map(i => `${i.productName} x${i.quantity}`).join(' | '),
+        Number(sale.total || 0).toFixed(2)
+    ]);
+    const csv = [headers, ...rows].map(row => row.map(value => `\"${String(value).replaceAll('\"','\"\"')}\"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url; link.download = `KoraPoint-sales-${todayKey}.csv`;
+    document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+};
 const sendDailyReport = async () => {
     const recipient = reportEmail.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) {
@@ -2499,6 +2557,30 @@ formatCurrency(closingProfit - closingExpenses))
 React.createElement('div', { className: 'flex justify-between text-xs text-gray-500 border-t border-gray-100 pt-2' },
 React.createElement('span', null, 'Gross profit: ', formatCurrency(closingProfit)),
 React.createElement('span', null, 'Expenses: ', formatCurrency(closingExpenses))
+)
+),
+// Entire-day sales table
+React.createElement('div', { className: 'stat-card p-4 daily-sales-report' },
+React.createElement('div', { className: 'flex flex-wrap items-center justify-between gap-2 mb-3' },
+React.createElement('div', null,
+React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '🧾 Today’s Sales'),
+React.createElement('p', { className: 'text-xs text-gray-400' }, todaySales.length, ' transactions')
+),
+React.createElement('button', { onClick: downloadDailySales, className: 'btn-primary text-sm', disabled: !todaySales.length }, '⬇ Download Day’s Sales')
+),
+todaySales.length === 0 ? React.createElement('p', { className: 'text-sm text-gray-400 py-5 text-center' }, 'No sales recorded today.') :
+React.createElement('div', { className: 'daily-sales-table-wrap' },
+React.createElement('table', { className: 'daily-sales-table w-full text-sm' },
+React.createElement('thead', null, React.createElement('tr', null, ['Time','Receipt','Customer','Payment','Items','Total'].map(h => React.createElement('th', { key: h, className: 'text-left px-3 py-2' }, h)))),
+React.createElement('tbody', null, todaySales.slice().reverse().map(sale => React.createElement('tr', { key: sale.id },
+React.createElement('td', { className: 'px-3 py-2 whitespace-nowrap' }, new Date(sale.date).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})),
+React.createElement('td', { className: 'px-3 py-2 whitespace-nowrap font-medium' }, sale.id),
+React.createElement('td', { className: 'px-3 py-2' }, sale.customerName || 'Walk-in Customer'),
+React.createElement('td', { className: 'px-3 py-2 whitespace-nowrap' }, sale.paymentMethod || 'Cash'),
+React.createElement('td', { className: 'px-3 py-2 min-w-[220px]' }, (sale.items || []).map(i => `${i.productName} ×${i.quantity}`).join(', ')),
+React.createElement('td', { className: 'px-3 py-2 whitespace-nowrap font-bold' }, formatCurrency(sale.total))
+)))
+)
 )
 ),
 // Best sellers
@@ -2745,6 +2827,21 @@ React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '
 React.createElement('p', { className: 'text-xs text-gray-400' }, 'Review the main POS workflow and features.')
 ),
 React.createElement('button', { onClick: startTour, className: 'btn-secondary text-sm whitespace-nowrap' }, 'Start Tour')
+),
+React.createElement('div', { className: 'stat-card p-4 install-card' },
+React.createElement('div', { className: 'flex items-center justify-between gap-3' },
+React.createElement('div', null,
+React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '📲 Install KoraPoint'),
+React.createElement('p', { className: 'text-xs text-gray-400 mt-1' }, 'Install the POS on this device for faster access and an app-like experience.')
+),
+React.createElement('button', { className: 'btn-primary text-sm whitespace-nowrap', onClick: async () => {
+    const result = await window.nexatillInstallPWA?.();
+    if (result === 'accepted') showToast('KoraPoint installed successfully');
+    else if (result === 'dismissed') showToast('No problem — you can install KoraPoint later from Settings.', 'info');
+    else if (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone) showToast('KoraPoint is already installed', 'info');
+    else showToast('Install is not available yet. On your browser, use the browser menu and choose “Install app” or “Add to Home screen”.', 'info');
+} }, 'Install App')
+)
 ),
 React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-1' }, '💾 Data Protection'),

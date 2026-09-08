@@ -5,16 +5,26 @@
   "start_url": "../html/",
   "scope": "../",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#f4f8ff",
+  "theme_color": "#1769aa",
   "orientation": "portrait-primary",
   "id": "/KoraPoint/",
-  "categories": ["business", "finance", "productivity"],
+  "categories": [
+    "business",
+    "finance",
+    "productivity"
+  ],
   "icons": [
     {
-      "src": "../assets/korapoint-icon.svg",
+      "src": "../assets/korapoint-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "../assets/korapoint-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
