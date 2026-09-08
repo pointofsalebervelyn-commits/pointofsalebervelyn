@@ -2711,20 +2711,15 @@ id: 'kora-install-settings-button',
 type: 'button',
 className: 'btn-primary text-sm whitespace-nowrap',
 onClick: async () => {
-  if (window.__koraDeferredInstallPrompt) {
-    const event = window.__koraDeferredInstallPrompt;
-    event.prompt();
-    try { await event.userChoice; } catch {}
+  const event = window.__koraDeferredInstallPrompt;
+  if (event) {
+    try { event.prompt(); await event.userChoice; } catch (e) { console.warn('PWA install prompt failed', e); }
     window.__koraDeferredInstallPrompt = null;
-    window.dispatchEvent(new Event('kora:install-state'));
   } else {
-    const msg = /iPhone|iPad|iPod/i.test(navigator.userAgent)
-      ? 'On iPhone/iPad: tap Share, then choose “Add to Home Screen”.'
-      : 'Open your browser menu (⋮) and choose “Install KoraPoint” or “Add to Home screen”.';
-    showToast(msg, 'info');
+    showToast(/iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'On iPhone/iPad: tap Share, then Add to Home Screen.' : 'Open your browser menu and choose Install KoraPoint or Add to Home screen.', 'info');
   }
-}, children: 'INSTALL APP'
-}),
+}
+}, 'INSTALL APP'),
 React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm text-gray-600' },
 'Logged in as ', React.createElement('span', { className: 'font-semibold' }, currentUser.name),
@@ -2854,7 +2849,7 @@ React.createElement('button', { onClick: handleAddUser, className: 'btn-primary'
 )
 )
 )
-);
+));
 }
 
 // ---- Guided Tour ----
