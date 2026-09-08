@@ -3093,3 +3093,74 @@ React.createElement(CartSidebar, { isOpen: cartOpen, onClose: () => setCartOpen(
 // ============================================================
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(React.createElement(AppProvider, null, React.createElement(App)));
+
+/* Manager Reset UI — always visible in Settings for authorized managers */
+function renderManagerResetControl(user) {
+  const role = String(user?.role || user?.user_metadata?.role || user?.app_metadata?.role || '').toLowerCase();
+  const isManager = role === 'manager' || role === 'owner' || role === 'admin';
+  const existing = document.getElementById('manager-reset-control');
+  if (existing) existing.remove();
+  if (!isManager) return;
+
+  const host = document.querySelector('#settings, [data-page="settings"], .settings-page, main');
+  if (!host) return;
+
+  const wrap = document.createElement('section');
+  wrap.id = 'manager-reset-control';
+  wrap.className = 'manager-reset-card';
+  wrap.innerHTML = `
+    <div>
+      <h3>Reset POS</h3>
+      <p>Manager only. This clears operational shop records and starts the POS afresh.</p>
+    </div>
+    <button type="button" id="manager-reset-button" class="manager-reset-button">RESET WHOLE POS</button>
+  `;
+  host.appendChild(wrap);
+
+  document.getElementById('manager-reset-button').addEventListener('click', async () => {
+    const confirmText = window.prompt('Type RESET to permanently clear the shop records.');
+    if (confirmText !== 'RESET') return;
+    const btn = document.getElementById('manager-reset-button');
+    btn.disabled = true;
+    btn.textContent = 'RESETTING…';
+    try {
+      const token = typeof getAccessToken === 'function' ? await getAccessToken() : null;
+      const headers = {'Content-Type':'application/json'};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch('/api/admin/reset', {method:'POST', headers, body: JSON.stringify({confirmation:'RESET'})});
+      if (!res.ok) throw new Error(`Reset failed (${res.status})`);
+      btn.textContent = 'RESET COMPLETE';
+      setTimeout(()=>window.location.reload(), 900);
+    } catch (e) {
+      console.error(e);
+      btn.disabled = false;
+      btn.textContent = 'RESET WHOLE POS';
+      window.alert('Reset could not be completed. Please check your connection and try again.');
+    }
+  });
+}
+
+/* Hook into common auth/settings render points without replacing existing logic. */
+document.addEventListener('DOMContentLoaded', () => {
+  const currentUser = window.currentUser || window.user || null;
+  if (currentUser) renderManagerResetControl(currentUser);
+  document.addEventListener('settings:opened', () => renderManagerResetControl(window.currentUser || window.user || null));
+});
+
+/* Keep requested dashboard/sales summary cards out of the UI.
+   Product cards are deliberately excluded. */
+function removeRequestedSummaryCards() {
+  const labels = ['Total Revenue','Gross Profit','Total Expenses','Monthly Sales','Weekly Sales'];
+  const nodes = document.querySelectorAll(
+    '.stat-card, .summary-card, .metric-card, .kpi-card, [data-card], .dashboard-card'
+  );
+  nodes.forEach(node => {
+    if (node.classList.contains('product-card')) return;
+    const text = (node.textContent || '').replace(/\s+/g,' ').trim().toLowerCase();
+    if (labels.some(label => text.includes(label.toLowerCase()))) {
+      node.remove();
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', removeRequestedSummaryCards);
+window.addEventListener('load', removeRequestedSummaryCards);

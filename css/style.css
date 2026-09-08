@@ -1251,3 +1251,42 @@ body{background:radial-gradient(circle at 5% 0%,rgba(23,105,170,.13),transparent
   .mobile-bottom-nav button { min-width: 0 !important; padding-left: 5px !important; padding-right: 5px !important; }
   .mobile-bottom-nav span:last-child { font-size: 10px !important; }
 }
+
+
+/* Manager-only reset control */
+.manager-reset-card{
+  margin:24px 0;
+  padding:18px;
+  border:1px solid rgba(153,27,27,.22);
+  border-radius:16px;
+  background:linear-gradient(135deg,#fff7f7,#fff);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+}
+.manager-reset-card h3{margin:0 0 6px;color:#7f1d1d}
+.manager-reset-card p{margin:0;color:#6b7280}
+.manager-reset-button{
+  flex:0 0 auto;
+  min-height:46px;
+  padding:12px 18px;
+  border:0;
+  border-radius:10px;
+  background:#991b1b!important;
+  color:#fff!important;
+  font-weight:800;
+  letter-spacing:.03em;
+  cursor:pointer;
+  box-shadow:0 6px 16px rgba(127,29,29,.22);
+}
+.manager-reset-button:hover{background:#7f1d1d!important}
+.manager-reset-button:disabled{opacity:.65;cursor:not-allowed}
+@media(max-width:600px){
+ .manager-reset-card{align-items:stretch;flex-direction:column}
+ .manager-reset-button{width:100%}
+}
+
+/* Requested summary-card removals — Product Cards are intentionally untouched. */
+.summary-card:has(.card-title, .label),
+.stat-card:has(.card-title, .label) { }
