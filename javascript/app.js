@@ -212,6 +212,7 @@ function AppProvider({ children }) {
     const [currentUser, setCurrentUser] = useState(() => savedSession?.user || null);
     const [currentCompany, setCurrentCompany] = useState(() => savedSession?.company || null);
     const [toast, setToast] = useState(null);
+    const [offlineQueueVersion, setOfflineQueueVersion] = useState(0);
 
     const clearLocalTenantData = () => {
         setProducts([]); setSales([]); setCustomers([]); setSuppliers([]); setExpenses([]);
@@ -362,13 +363,13 @@ function AppProvider({ children }) {
     };
 
     const adjustStock = (productId, quantity, reason = 'Manual adjustment') => {
-        const amount = Number(quantity);
+        const amount = Math.trunc(Number(quantity));
         if (!Number.isFinite(amount) || amount === 0) return;
         const token = DB.get(SESSION_KEY, null)?.accessToken;
         if (token) { apiRequest(`/api/products/${productId}/stock-adjustments`, { method: 'POST', body: JSON.stringify({ quantity: amount, reason }) }, token).then(() => refreshTenantData()).then(() => showToast('Stock updated')).catch(error => showToast(error.message, 'error')); return; }
         setProducts(prev => prev.map(product => product.id === productId ? {
             ...product,
-            quantity: Math.max(0, product.quantity + amount)
+            quantity: Math.max(0, Math.round(Number(product.quantity) + amount))
         } : product));
         setStockMovements(prev => [...prev, {
             id: 'm' + Date.now(),
@@ -453,14 +454,16 @@ function AppProvider({ children }) {
     };
 
     const addToCart = (product, qty = 1) => {
+        const resolvedProduct = typeof product === 'string' ? products.find(p => p.id === product) : product;
+        if (!resolvedProduct) { showToast('Product could not be added to cart', 'error'); return; }
         setCart(prev => {
-            const existing = prev.find(c => c.productId === product.id);
+            const existing = prev.find(c => c.productId === resolvedProduct.id);
             if (existing) {
-                return prev.map(c => c.productId === product.id ? { ...c, quantity: c.quantity + qty } : c);
+                return prev.map(c => c.productId === resolvedProduct.id ? { ...c, quantity: c.quantity + qty } : c);
             }
-            return [...prev, { productId: product.id, product, quantity: qty }];
+            return [...prev, { productId: resolvedProduct.id, product: resolvedProduct, quantity: qty }];
         });
-        showToast(`Added ${product.name} to cart`);
+        showToast(`Added ${resolvedProduct.name} to cart`);
     };
 
     const removeFromCart = (productId) => {
@@ -540,9 +543,10 @@ function AppProvider({ children }) {
 
     const completeSale = (saleData) => {
         const token = DB.get(SESSION_KEY, null)?.accessToken;
-        if (token) { return apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(saleData) }, token).then(data => {
+        const normalizedSale = { ...saleData, clientReference: saleData.clientReference || `sale-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` };
+        if (token && navigator.onLine) { return apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(normalizedSale) }, token).then(data => {
             setProducts(prev => prev.map(product => {
-                const item = saleData.items.find(line => line.productId === product.id);
+                const item = normalizedSale.items.find(line => line.productId === product.id);
                 return item ? { ...product, quantity: Math.max(0, product.quantity - item.quantity) } : product;
             }));
             setSales(prev => [...prev, data.sale]);
@@ -551,7 +555,7 @@ function AppProvider({ children }) {
         }); }
         // Reduce inventory
         const updatedProducts = products.map(p => {
-            const item = saleData.items.find(i => i.productId === p.id);
+            const item = normalizedSale.items.find(i => i.productId === p.id);
             if (item) {
                 return { ...p, quantity: Math.max(0, p.quantity - item.quantity) };
             }
@@ -559,42 +563,73 @@ function AppProvider({ children }) {
         });
         setProducts(updatedProducts);
         DB.set('products', updatedProducts);
-        setStockMovements(prev => [...prev, ...saleData.items.map(item => ({
+        setStockMovements(prev => [...prev, ...normalizedSale.items.map(item => ({
             id: 'm' + Date.now() + item.productId,
             productId: item.productId,
-            quantity: -item.quantity,
+            quantity: -Math.round(Number(item.quantity)),
             reason: 'Sale',
             date: new Date().toISOString()
         }))]);
         const newSale = {
             id: 's' + Date.now(),
-            ...saleData,
+            ...normalizedSale,
             date: new Date().toISOString(),
-            saleDate: new Date().toLocaleDateString('en-CA')
+            saleDate: new Date().toLocaleDateString('en-CA'),
+            syncStatus: 'pending'
         };
+        const offlineQueue = DB.get('offlineSaleQueue', []);
+        DB.set('offlineSaleQueue', [...offlineQueue, { id: normalizedSale.clientReference, payload: normalizedSale, localSaleId: newSale.id, queuedAt: newSale.date }]);
+        setOfflineQueueVersion(v => v + 1);
         const updatedSales = [...sales, newSale];
         setSales(updatedSales);
         DB.set('sales', updatedSales);
         logAction('Sale completed', newSale.id);
         // Update customer
-        if (saleData.customerName) {
+        if (normalizedSale.customerName) {
             setCustomers(prev => {
-                const existing = prev.find(c => c.name === saleData.customerName);
+                const existing = prev.find(c => c.name === normalizedSale.customerName);
                 if (existing) {
-                    return prev.map(c => c.name === saleData.customerName ? { ...c,
+                    return prev.map(c => c.name === normalizedSale.customerName ? { ...c,
                         lastPurchase: new Date().toISOString(),
-                        totalSpent: (c.totalSpent || 0) + saleData.total,
+                        totalSpent: (c.totalSpent || 0) + normalizedSale.total,
                         purchaseCount: (c.purchaseCount || 0) + 1 } : c);
                 }
-                return [...prev, { id: 'c' + Date.now(), name: saleData.customerName,
-                    phone: saleData.customerPhone || '', lastPurchase: new Date().toISOString(),
-                    totalSpent: saleData.total, purchaseCount: 1 }];
+                return [...prev, { id: 'c' + Date.now(), name: normalizedSale.customerName,
+                    phone: normalizedSale.customerPhone || '', lastPurchase: new Date().toISOString(),
+                    totalSpent: normalizedSale.total, purchaseCount: 1 }];
             });
         }
         clearCart();
         showToast('Sale completed! Receipt generated.');
         return newSale;
     };
+
+    const flushOfflineSales = async () => {
+        const session = DB.get(SESSION_KEY, null);
+        if (!session?.accessToken || session.accessToken === 'local-demo-token' || !navigator.onLine) return;
+        const queue = DB.get('offlineSaleQueue', []);
+        if (!queue.length) return;
+        const remaining = [];
+        for (const item of queue) {
+            try {
+                const data = await apiRequest('/api/sales', { method: 'POST', body: JSON.stringify(item.payload) }, session.accessToken);
+                setSales(prev => prev.map(sale => sale.id === item.localSaleId ? data.sale : sale));
+            } catch (error) {
+                if (error.status !== 409) remaining.push(item);
+            }
+        }
+        DB.set('offlineSaleQueue', remaining);
+        setOfflineQueueVersion(v => v + 1);
+        if (!remaining.length) showToast('Offline sales synced successfully');
+        await refreshTenantData();
+    };
+
+    useEffect(() => {
+        const handleOnline = () => setTimeout(() => flushOfflineSales(), 700);
+        window.addEventListener('online', handleOnline);
+        if (navigator.onLine) setTimeout(() => flushOfflineSales(), 1000);
+        return () => window.removeEventListener('online', handleOnline);
+    }, [currentUser?.id]);
 
     const value = {
         products,
@@ -620,6 +655,8 @@ function AppProvider({ children }) {
         stockMovements,
         adjustStock,
         auditLogs,
+        offlineSaleQueue: DB.get('offlineSaleQueue', []),
+        flushOfflineSales,
         purchases,
         recordPurchase,
         refundSale,
@@ -891,6 +928,7 @@ function CartSidebar({ isOpen, onClose }) {
     const [paymentMethod, setPaymentMethod] = useState('Cash');
     const [cashReceived, setCashReceived] = useState('');
     const [processingSale, setProcessingSale] = useState(false);
+    const [saleComplete, setSaleComplete] = useState(false);
 
     const totalItems = cart.reduce((sum, c) => sum + c.quantity, 0);
     const totalAmount = cart.reduce((sum, c) => sum + c.quantity * c.product.sellingPrice, 0);
@@ -932,17 +970,22 @@ function CartSidebar({ isOpen, onClose }) {
         setProcessingSale(true);
         try {
             await completeSale(saleData);
-            setCustomerName('');
-            setCustomerPhone('');
-            setPaymentMethod('Cash');
-            setCashReceived('');
-            setShowCheckout(false);
-            onClose();
+            setSaleComplete(true);
         } catch (error) {
             showToast(error.message || 'Sale could not be completed. Your transaction was not saved.', 'error');
         } finally {
             setProcessingSale(false);
         }
+    };
+
+    const finishCheckout = () => {
+        setSaleComplete(false);
+        setShowCheckout(false);
+        setCustomerName('');
+        setCustomerPhone('');
+        setPaymentMethod('Cash');
+        setCashReceived('');
+        onClose();
     };
 
     return React.createElement('div', {
@@ -1034,7 +1077,15 @@ function CartSidebar({ isOpen, onClose }) {
             title: 'Checkout',
             maxWidth: 'max-w-md'
         },
-        React.createElement('div', { className: 'space-y-3' },
+        saleComplete
+            ? React.createElement('div', { className: 'sale-success-panel text-center py-6' },
+                React.createElement('div', { className: 'sale-success-check' }, '✓'),
+                React.createElement('h3', { className: 'text-2xl font-extrabold text-emerald-700 mt-4' }, 'Sale Done!'),
+                React.createElement('p', { className: 'text-sm text-gray-500 mt-1' }, 'The sale was recorded and stock was updated.'),
+                React.createElement('p', { className: 'text-xl font-bold text-gray-800 mt-4' }, formatCurrency(totalAmount)),
+                React.createElement('button', { onClick: finishCheckout, className: 'w-full mt-5 py-3 rounded-xl font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition checkout-done-btn' }, '✓ Done & Exit')
+            )
+            : React.createElement('div', { className: 'space-y-3' },
             React.createElement('div', null,
                 React.createElement('label', { className: 'block text-xs font-medium text-gray-500 mb-1' },
                     'Customer Name (optional)'),
@@ -1104,8 +1155,9 @@ function CartSidebar({ isOpen, onClose }) {
             ),
             React.createElement('button', {
                 onClick: handleCheckout,
-                className: 'w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-xl transition'
-            }, '✅ Complete Sale')
+                disabled: processingSale,
+                className: `w-full py-3 rounded-xl font-bold text-white transition checkout-submit-btn ${processingSale ? 'opacity-70 cursor-wait' : ''}`
+            }, processingSale ? '⏳ Processing sale...' : '✓ Complete Sale')
         ))
     );
 }
@@ -1169,7 +1221,6 @@ function Dashboard() {
     const isCashier = currentUser?.role === 'cashier';
 
     const totalProducts = products.length;
-    const totalStock = products.reduce((sum, p) => sum + p.quantity, 0);
     const today = new Date().toLocaleDateString('en-CA');
     const todaySales = sales.filter(s => isActiveSale(s) && (s.saleDate || new Date(s.date).toLocaleDateString('en-CA')) === today);
     const todayRevenue = todaySales.reduce((sum, s) => sum + s.total, 0);
@@ -1218,7 +1269,6 @@ function Dashboard() {
         // Stats
         React.createElement('div', { className: 'grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3' },
             React.createElement(StatCard, { icon: '📦', label: 'Products', value: totalProducts, color: 'amber' }),
-            React.createElement(StatCard, { icon: '📊', label: 'Total Stock', value: totalStock, color: 'blue' }),
             !isCashier && React.createElement(StatCard, { icon: '💰', label: "Today's Sales", value: formatCurrency(todayRevenue),
                 sub: todaySales.length + ' orders', color: 'emerald' }),
             !isCashier && React.createElement(StatCard, { icon: '📈', label: 'Weekly Sales', value: formatCurrency(weekRevenue),
@@ -1334,7 +1384,7 @@ function SellPage() {
     const filtered = useMemo(() => {
         const q = search.trim().toLowerCase();
         return products.filter(p => {
-            const matchesSearch = !q || [p.name, p.barcode, p.category, p.materialType, p.supplier]
+            const matchesSearch = !q || [p.name, p.barcode, p.sku, p.productCode, p.category, p.materialType, p.supplier, p.unit]
                 .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
             return matchesSearch && (category === 'All' || p.category === category);
         }).sort((a,b) => a.name.localeCompare(b.name));
@@ -1395,7 +1445,7 @@ function SellPage() {
                         ),
                         React.createElement('button', {
                             disabled: out,
-                            onClick: () => { addToCart(p.id); showToast(`${p.name} added to cart`, 'success'); },
+                            onClick: () => { addToCart(p); showToast(`${p.name} added to cart`, 'success'); },
                             className: 'sell-add-btn'
                         }, out ? 'Out' : '+ Add')
                     );
@@ -1483,7 +1533,6 @@ function ProductsPage() {
     const [search, setSearch] = useState('');
     const [category, setCategory] = useState('All');
     const [sort, setSort] = useState('name');
-    const [viewMode, setViewMode] = useState(() => DB.get('productsViewMode', 'grid'));
     const [editing, setEditing] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
     const [scannerOpen, setScannerOpen] = useState(false);
@@ -1497,7 +1546,7 @@ function ProductsPage() {
         let result = products;
         if (search) {
             const s = search.toLowerCase();
-            result = result.filter(p => p.name.toLowerCase().includes(s) || p.barcode?.toLowerCase().includes(s));
+            result = result.filter(p => [p.name, p.barcode, p.sku, p.productCode, p.category, p.materialType, p.unit].some(v => String(v || '').toLowerCase().includes(s)));
         }
         if (category !== 'All') {
             result = result.filter(p => p.category === category);
@@ -1523,20 +1572,12 @@ function ProductsPage() {
         if (amount !== null) adjustStock(product.id, amount, 'Manual adjustment');
     };
 
-    const changeViewMode = (mode) => {
-        setViewMode(mode);
-        DB.set('productsViewMode', mode);
-    };
 
     return React.createElement('div', { className: 'space-y-4' },
         // Header
         React.createElement('div', { className: 'flex flex-col sm:flex-row sm:items-center justify-between gap-3' },
             React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, '📦 Inventory'),
             React.createElement('div', { className: 'flex items-center gap-2' },
-                React.createElement('div', { className: 'view-toggle', role: 'group', 'aria-label': 'Product display' },
-                    React.createElement('button', { type: 'button', className: viewMode === 'cards' ? 'active' : '', onClick: () => changeViewMode('cards'), 'aria-pressed': viewMode === 'cards' }, '▦ Cards'),
-                    React.createElement('button', { type: 'button', className: viewMode === 'grid' ? 'active' : '', onClick: () => changeViewMode('grid'), 'aria-pressed': viewMode === 'grid' }, '▤ Grid')
-                ),
                 React.createElement('button', { onClick: () => setShowAdd(true), className: 'btn-primary text-sm' }, '➕ Add Product')
             )
         ),
@@ -1570,28 +1611,14 @@ function ProductsPage() {
                 className: 'btn-secondary text-sm min-h-[42px]'
             }, '📷 Scan')
         ),
-        // Product display: visual cards or compact table-style grid
-        viewMode === 'grid'
-            ? React.createElement(ProductTable, {
-                products: filtered,
-                onEdit: (product) => setEditing(product),
-                onDelete: handleDelete,
-                onAddToCart: addToCart,
-                onAdjustStock: handleAdjustStock
-            })
-            : React.createElement('div', { className: 'grid-cards' },
-                filtered.map(p =>
-                    React.createElement(ProductCard, {
-                        key: p.id,
-                        product: p,
-                        className: 'product-card',
-                        onEdit: () => setEditing(p),
-                        onDelete: handleDelete,
-                        onAddToCart: addToCart,
-                        onAdjustStock: handleAdjustStock
-                    })
-                )
-            ),
+        // Products always use the compact one-line table layout to prevent overcrowding.
+        React.createElement(ProductTable, {
+            products: filtered,
+            onEdit: (product) => setEditing(product),
+            onDelete: handleDelete,
+            onAddToCart: addToCart,
+            onAdjustStock: handleAdjustStock
+        }),
         filtered.length === 0 && React.createElement('p', { className: 'text-center text-gray-400 py-8' },
             'No products found'),
         // Add modal
@@ -1634,11 +1661,12 @@ function ProductForm({ product, onClose, mode }) {
         supplier: selectedProduct?.supplier || '',
         buyingPrice: selectedProduct?.buyingPrice ?? 0,
         sellingPrice: selectedProduct?.sellingPrice ?? 0,
-        quantity: selectedProduct?.quantity ?? 0,
-        minStockLevel: selectedProduct?.minStockLevel ?? 5,
+        quantity: Math.round(Number(selectedProduct?.quantity ?? 0)),
+        minStockLevel: Math.round(Number(selectedProduct?.minStockLevel ?? 5)),
         unit: selectedProduct?.unit || 'piece',
         description: selectedProduct?.description || '',
         barcode: selectedProduct?.barcode || '',
+        sku: selectedProduct?.sku || selectedProduct?.productCode || '',
     });
     const [form, setForm] = useState(() => getDefaultForm(product));
     const [imageFile, setImageFile] = useState(null);
@@ -1844,6 +1872,7 @@ function ProductForm({ product, onClose, mode }) {
                     'Quantity *'),
                 React.createElement('input', {
                     type: 'number',
+                    step: '1',
                     value: form.quantity,
                     onChange: (e) => setForm(prev => ({ ...prev, quantity: parseInt(e.target.value) || 0 })),
                     className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
@@ -1856,6 +1885,7 @@ function ProductForm({ product, onClose, mode }) {
                     'Min Stock Alert'),
                 React.createElement('input', {
                     type: 'number',
+                    step: '1',
                     value: form.minStockLevel,
                     onChange: (e) => setForm(prev => ({ ...prev, minStockLevel: parseInt(e.target.value) ||
                             5 })),
@@ -2256,7 +2286,7 @@ React.createElement('button', { onClick: handlePurchase, className: 'btn-primary
 
 // ---- Expenses Page ----
 function ExpensesPage() {
-const { expenses, setExpenses, showToast, apiMutation } = useApp();
+const { expenses, setExpenses, showToast, apiMutation, refreshTenantData } = useApp();
 const [showAdd, setShowAdd] = useState(false);
 const [form, setForm] = useState({ description: '', amount: 0, category: 'Utilities', date: new Date().toISOString()
 .split('T')[0] });
@@ -2271,6 +2301,19 @@ setExpenses(prev => [...prev, { ...form, id: 'e' + Date.now() }]);
 showToast('Expense added');
 setForm({ description: '', amount: 0, category: 'Utilities', date: new Date().toISOString().split('T')[0] });
 setShowAdd(false);
+};
+
+const handleDeleteExpense = async (id) => {
+if (!window.confirm('Delete this expense? This action cannot be undone.')) return;
+const token = DB.get(SESSION_KEY, null)?.accessToken;
+if (token && token !== 'local-demo-token') {
+try { await apiRequest(`/api/expenses/${id}`, { method: 'DELETE' }, token); await refreshTenantData(); showToast('Expense deleted', 'info'); }
+catch (error) { showToast(error.message, 'error'); }
+return;
+}
+setExpenses(prev => prev.filter(e => e.id !== id));
+logAction('Expense deleted', id);
+showToast('Expense deleted', 'info');
 };
 
 const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
@@ -2288,15 +2331,16 @@ color: 'rose' }),
 React.createElement('div', { className: 'space-y-2' },
 expenses.length === 0 ?
 React.createElement('p', { className: 'text-center text-gray-400 py-8' }, 'No expenses recorded') :
-expenses.sort((a, b) => new Date(b.date) - new Date(a.date)).map(e =>
-React.createElement('div', { key: e.id, className: 'stat-card p-3 flex items-center justify-between' },
-React.createElement('div', null,
-React.createElement('p', { className: 'font-medium text-gray-800 text-sm' }, e.description),
-React.createElement('p', { className: 'text-xs text-gray-400' },
-e.category, ' • ', new Date(e.date).toLocaleDateString()
-)
+[...expenses].sort((a, b) => new Date(b.date) - new Date(a.date)).map(e =>
+React.createElement('div', { key: e.id, className: 'stat-card p-3 flex items-center justify-between gap-3' },
+React.createElement('div', { className: 'min-w-0' },
+React.createElement('p', { className: 'font-medium text-gray-800 text-sm truncate' }, e.description),
+React.createElement('p', { className: 'text-xs text-gray-400' }, e.category, ' • ', new Date(e.date).toLocaleDateString())
 ),
-React.createElement('span', { className: 'font-bold text-rose-500' }, formatCurrency(e.amount))
+React.createElement('div', { className: 'flex items-center gap-3 shrink-0' },
+React.createElement('span', { className: 'font-bold text-rose-500' }, formatCurrency(e.amount)),
+React.createElement('button', { onClick: () => handleDeleteExpense(e.id), className: 'btn-danger expense-delete-btn text-xs px-3 py-2', title: 'Delete expense', 'aria-label': `Delete expense ${e.description}` }, '🗑 Delete')
+)
 )
 )
 ),
@@ -2352,7 +2396,6 @@ const totalRevenue = activeSales.reduce((sum, s) => sum + s.total, 0);
 const totalProfit = activeSales.reduce((sum, s) => sum + (s.profit || 0), 0);
 const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
 const netProfit = totalProfit - totalExpenses;
-const totalStockValue = products.reduce((sum, p) => sum + p.quantity * p.buyingPrice, 0);
 const todayKey = new Date().toLocaleDateString('en-CA');
 const todaySales = activeSales.filter(s => (s.saleDate || new Date(s.date).toLocaleDateString('en-CA')) === todayKey);
 const todayExpenses = expenses.filter(e => e.date === todayKey);
@@ -2423,8 +2466,6 @@ React.createElement(StatCard, { icon: '💸', label: 'Total Expenses', value: fo
 color: 'rose' }),
 React.createElement(StatCard, { icon: '🏆', label: 'Net Profit', value: formatCurrency(netProfit),
 color: netProfit >= 0 ? 'emerald' : 'rose' }),
-React.createElement(StatCard, { icon: '📦', label: 'Inventory Value', value: formatCurrency(totalStockValue),
-color: 'blue' }),
 React.createElement(StatCard, { icon: '📋', label: 'Total Sales', value: sales.length, color: 'violet' })
 ),
 // Daily closing report
@@ -2748,6 +2789,7 @@ React.createElement('p', null, '8. Each company sees only its own workspace.')
 ),
 ['owner', 'manager'].includes(currentUser?.role) && React.createElement('div', { className: 'flex items-center justify-between' },
 React.createElement('h3', { className: 'font-semibold text-gray-700' }, '👥 Users'),
+React.createElement('p', { className: 'text-xs text-gray-400 mb-2' }, 'Owner: full access · Manager: shop operations + staff · Cashier: selling and checkout only.'),
 React.createElement('button', {
 onClick: () => setShowAdd(true),
 className: 'btn-primary text-sm'
@@ -2758,7 +2800,7 @@ safeUsers.map(u =>
 React.createElement('div', { key: u.id, className: 'stat-card p-3 flex items-center justify-between' },
 React.createElement('div', null,
 React.createElement('p', { className: 'font-medium text-gray-800 text-sm' }, u.name),
-React.createElement('p', { className: 'text-xs text-gray-400' }, u.role)
+React.createElement('p', { className: 'text-xs text-gray-400' }, u.role === 'owner' ? 'Full access' : u.role === 'manager' ? 'Shop + staff management' : 'Sales + checkout')
 ),
 u.id !== currentUser?.id && React.createElement('button', {
 onClick: () => handleDeleteUser(u.id),
@@ -2850,7 +2892,7 @@ function Tour({ step, onNext, onBack, onClose, onNavigate }) {
 
 // ---- Main App ----
 function App() {
-const { currentUser, currentCompany } = useApp();
+const { currentUser, currentCompany, offlineSaleQueue, flushOfflineSales } = useApp();
 const hasSession = Boolean(DB.get(SESSION_KEY, null)?.accessToken);
 const [currentPage, setCurrentPage] = useState('dashboard');
 const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -2995,7 +3037,8 @@ React.createElement('div', { className: 'p-3 border-t border-gray-100 text-xs te
 
 return React.createElement(React.Fragment, null,
 React.createElement(Toast),
-!isOnline && React.createElement('div', { className: 'offline-banner' }, 'Offline mode: your records are saved on this device.'),
+!isOnline && React.createElement('div', { className: 'offline-banner' }, 'Offline mode — sales are saved on this device.', offlineSaleQueue?.length ? ` ${offlineSaleQueue.length} sale${offlineSaleQueue.length === 1 ? '' : 's'} waiting to sync.` : ''),
+    isOnline && offlineSaleQueue?.length > 0 && React.createElement('div', { className: 'sync-banner' }, `⏳ ${offlineSaleQueue.length} offline sale${offlineSaleQueue.length === 1 ? '' : 's'} waiting to sync. `, React.createElement('button', { onClick: flushOfflineSales, className: 'underline font-semibold' }, 'Sync now')),
 tourStep !== null && React.createElement(Tour, {
     step: tourStep,
     onNext: () => tourStep >= 4 ? closeTour() : setTourStep(tourStep + 1),

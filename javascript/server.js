@@ -122,6 +122,11 @@ function requireStaffAdmin(req, res, next) {
     next();
 }
 
+function requireManager(req, res, next) {
+    if (!['owner', 'manager'].includes(req.user.role)) return res.status(403).json({ error: 'Only the business owner or a manager can do this' });
+    next();
+}
+
 app.get('/health', async (_req, res) => {
     try {
         await pool.query('SELECT 1');
@@ -290,6 +295,10 @@ app.post('/api/sales', requireAuth, async (req, res, next) => {
     if (!Array.isArray(sale.items) || !sale.items.length || sale.items.some(item => !item.productId || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0)) {
         return res.status(400).json({ error: 'Valid sale items are required' });
     }
+    if (sale.clientReference) {
+        const existing = await pool.query('SELECT id, created_at AS date, customer_name AS "customerName", customer_phone AS "customerPhone", payment_method AS "paymentMethod", items, total, profit, cash_received AS "cashReceived", change_amount AS "change", status FROM sales WHERE tenant_id=$1 AND client_reference=$2 LIMIT 1', [req.user.tenant_id, sale.clientReference]);
+        if (existing.rowCount) return res.status(200).json({ sale: existing.rows[0] });
+    }
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
@@ -298,8 +307,8 @@ app.post('/api/sales', requireAuth, async (req, res, next) => {
             if (!stock.rowCount) throw Object.assign(new Error('Insufficient stock'), { status: 409 });
             await client.query('INSERT INTO stock_movements (tenant_id, product_id, quantity, reason) VALUES ($1,$2,$3,$4)', [req.user.tenant_id, item.productId, -Number(item.quantity), 'Sale']);
         }
-        const inserted = await client.query(`INSERT INTO sales (tenant_id, customer_name, customer_phone, payment_method, items, total, profit, cash_received, change_amount, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id, created_at AS date`, [req.user.tenant_id, sale.customerName || 'Walk-in Customer', sale.customerPhone || '', sale.paymentMethod || 'Cash', JSON.stringify(sale.items), Number(sale.total) || 0, Number(sale.profit) || 0, Number(sale.cashReceived) || 0, Number(sale.change) || 0, req.user.id]);
+        const inserted = await client.query(`INSERT INTO sales (tenant_id, customer_name, customer_phone, payment_method, items, total, profit, cash_received, change_amount, created_by, client_reference)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, created_at AS date`, [req.user.tenant_id, sale.customerName || 'Walk-in Customer', sale.customerPhone || '', sale.paymentMethod || 'Cash', JSON.stringify(sale.items), Number(sale.total) || 0, Number(sale.profit) || 0, Number(sale.cashReceived) || 0, Number(sale.change) || 0, req.user.id, sale.clientReference || null]);
         if (sale.customerName && sale.customerName !== 'Walk-in Customer') await client.query(`INSERT INTO customers (tenant_id,name,phone,last_purchase,total_spent,purchase_count) VALUES ($1,$2,$3,now(),$4,1) ON CONFLICT (tenant_id,name) DO UPDATE SET phone=EXCLUDED.phone,last_purchase=now(),total_spent=customers.total_spent+EXCLUDED.total_spent,purchase_count=customers.purchase_count+1`, [req.user.tenant_id, sale.customerName, sale.customerPhone || '', Number(sale.total) || 0]);
         await addAudit(client, req.user.tenant_id, req.user.id, 'Sale completed', inserted.rows[0].id);
         await client.query('COMMIT'); res.status(201).json({ sale: { ...sale, id: inserted.rows[0].id, date: inserted.rows[0].date } });
@@ -324,6 +333,7 @@ app.post('/api/purchases', requireAuth, async (req, res, next) => {
 
 app.get('/api/customers', requireAuth, async (req, res, next) => { try { const result = await pool.query(`SELECT id,name,phone,last_purchase AS "lastPurchase",total_spent AS "totalSpent",purchase_count AS "purchaseCount" FROM customers WHERE tenant_id=$1 ORDER BY name`, [req.user.tenant_id]); res.json({ customers: result.rows }); } catch (error) { next(error); } });
 app.post('/api/expenses', requireAuth, async (req, res, next) => { try { const result = await pool.query(`INSERT INTO expenses (tenant_id,description,amount,category,expense_date) VALUES ($1,$2,$3,$4,COALESCE($5::date,CURRENT_DATE)) RETURNING id,description,amount,category,expense_date AS date`, [req.user.tenant_id, req.body.description, Number(req.body.amount) || 0, req.body.category || '', req.body.date || null]); await addAudit(pool, req.user.tenant_id, req.user.id, 'Expense recorded', req.body.description || ''); res.status(201).json({ expense: result.rows[0] }); } catch (error) { next(error); } });
+app.delete('/api/expenses/:id', requireAuth, requireManager, async (req, res, next) => { try { const result = await pool.query('DELETE FROM expenses WHERE id=$1 AND tenant_id=$2 RETURNING id,description', [req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'Expense not found' }); await addAudit(pool, req.user.tenant_id, req.user.id, 'Expense deleted', result.rows[0].description); res.status(204).end(); } catch (error) { next(error); } });
 app.get('/api/suppliers', requireAuth, async (req, res, next) => { try { const result = await pool.query('SELECT id,name,contact,phone FROM suppliers WHERE tenant_id=$1 ORDER BY name', [req.user.tenant_id]); res.json({ suppliers: result.rows }); } catch (error) { next(error); } });
 app.post('/api/suppliers', requireAuth, async (req, res, next) => { try { const result = await pool.query('INSERT INTO suppliers (tenant_id,name,contact,phone) VALUES ($1,$2,$3,$4) RETURNING id,name,contact,phone', [req.user.tenant_id, req.body.name, req.body.contact || '', req.body.phone || '']); res.status(201).json({ supplier: result.rows[0] }); } catch (error) { next(error); } });
 app.patch('/api/suppliers/:id', requireAuth, async (req, res, next) => { try { const result = await pool.query('UPDATE suppliers SET name=COALESCE($1,name),contact=COALESCE($2,contact),phone=COALESCE($3,phone) WHERE id=$4 AND tenant_id=$5 RETURNING id,name,contact,phone', [req.body.name, req.body.contact, req.body.phone, req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'Supplier not found' }); res.json({ supplier: result.rows[0] }); } catch (error) { next(error); } });
@@ -347,7 +357,7 @@ app.post('/api/users', requireAuth, requireStaffAdmin, async (req, res, next) =>
         }
     } catch (error) { next(error); }
 });
-app.delete('/api/users/:id', requireAuth, requireStaffAdmin, async (req, res, next) => { try { if (req.params.id === req.user.id) return res.status(400).json({ error: 'You cannot revoke yourself' }); const result = await pool.query('UPDATE users SET is_active=false WHERE id=$1 AND tenant_id=$2', [req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'User not found' }); res.status(204).end(); } catch (error) { next(error); } });
+app.delete('/api/users/:id', requireAuth, requireStaffAdmin, async (req, res, next) => { try { if (req.params.id === req.user.id) return res.status(400).json({ error: 'You cannot revoke yourself' }); const result = await pool.query('UPDATE users SET is_active=false WHERE id=$1 AND tenant_id=$2 RETURNING name', [req.params.id, req.user.tenant_id]); if (!result.rowCount) return res.status(404).json({ error: 'User not found' }); await addAudit(pool, req.user.tenant_id, req.user.id, 'Staff access revoked', result.rows[0].name); res.status(204).end(); } catch (error) { next(error); } });
 app.patch('/api/auth/password', requireAuth, async (req, res, next) => {
     const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
     const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';

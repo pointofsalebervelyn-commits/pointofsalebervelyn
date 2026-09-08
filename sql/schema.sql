@@ -60,8 +60,8 @@ CREATE TABLE IF NOT EXISTS products (
     supplier TEXT,
     buying_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
     selling_price NUMERIC(12, 2) NOT NULL DEFAULT 0,
-    quantity NUMERIC(12, 3) NOT NULL DEFAULT 0,
-    min_stock_level NUMERIC(12, 3) NOT NULL DEFAULT 0,
+    quantity NUMERIC(12, 0) NOT NULL DEFAULT 0,
+    min_stock_level NUMERIC(12, 0) NOT NULL DEFAULT 0,
     unit TEXT,
     description TEXT,
     barcode TEXT,
@@ -76,8 +76,10 @@ CREATE TABLE IF NOT EXISTS sales (
     customer_name TEXT NOT NULL, customer_phone TEXT, payment_method TEXT NOT NULL,
     items JSONB NOT NULL, total NUMERIC(12, 2) NOT NULL, profit NUMERIC(12, 2) NOT NULL DEFAULT 0,
     cash_received NUMERIC(12, 2) NOT NULL DEFAULT 0, change_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'completed', refunded_at TIMESTAMPTZ, created_by UUID REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    status TEXT NOT NULL DEFAULT 'completed', refunded_at TIMESTAMPTZ, created_by UUID REFERENCES users(id), client_reference TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS client_reference TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS sales_tenant_client_reference_uq ON sales(tenant_id, client_reference) WHERE client_reference IS NOT NULL;
 CREATE INDEX IF NOT EXISTS sales_tenant_idx ON sales (tenant_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS customers (
@@ -99,12 +101,12 @@ CREATE TABLE IF NOT EXISTS registers (
 );
 CREATE TABLE IF NOT EXISTS stock_movements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE, quantity NUMERIC(12, 3) NOT NULL,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE, quantity NUMERIC(12, 0) NOT NULL,
     reason TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS purchases (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT, supplier TEXT, quantity NUMERIC(12, 3) NOT NULL,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT, supplier TEXT, quantity NUMERIC(12, 0) NOT NULL,
     unit_cost NUMERIC(12, 2) NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -156,3 +158,9 @@ CREATE INDEX IF NOT EXISTS products_tenant_name_idx ON products(tenant_id,name);
 CREATE UNIQUE INDEX IF NOT EXISTS products_tenant_product_code_uq ON products(tenant_id,product_code) WHERE product_code IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS products_tenant_barcode_uq ON products(tenant_id,barcode) WHERE barcode IS NOT NULL AND barcode <> '';
 CREATE INDEX IF NOT EXISTS quick_sell_tenant_order_idx ON quick_sell_items(tenant_id,display_order) WHERE is_active=true;
+
+-- Stock quantities are whole units in this POS. Existing decimals are rounded safely.
+ALTER TABLE products ALTER COLUMN quantity TYPE NUMERIC(12,0) USING ROUND(quantity);
+ALTER TABLE products ALTER COLUMN min_stock_level TYPE NUMERIC(12,0) USING ROUND(min_stock_level);
+ALTER TABLE stock_movements ALTER COLUMN quantity TYPE NUMERIC(12,0) USING ROUND(quantity);
+ALTER TABLE purchases ALTER COLUMN quantity TYPE NUMERIC(12,0) USING ROUND(quantity);
