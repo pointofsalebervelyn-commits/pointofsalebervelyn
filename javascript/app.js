@@ -2508,6 +2508,7 @@ window.history.replaceState({}, document.title, window.location.pathname);
 };
 
 const handleLogout = () => {
+if (!window.confirm('Are you sure you want to log out?')) return;
 logout();
 setIsLogin(true);
 showToast('Logged out', 'info');
