@@ -1,14 +1,15 @@
-const CACHE_NAME = 'korapoint-shell-v6';
+const CACHE_NAME = 'bopstina-shell-v8';
 const APP_SHELL = [
   '/html/',
   '/html/index.html',
   '/css/style.css',
-  '/javascript/app.js?v=6',
+  '/javascript/app.js?v=8',
   '/javascript/config.js',
   '/manifest.webmanifest',
-  '/assets/korapoint-192.png',
-  '/assets/korapoint-512.png',
-  '/assets/korapoint-icon.svg'
+  '/assets/bopstina-192.png',
+  '/assets/bopstina-512.png',
+  '/assets/bosptina%20logo.jpg',
+  '/assets/Bopstina%20login%20pic.jpg'
 ];
 
 self.addEventListener('install', event => {

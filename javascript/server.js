@@ -484,7 +484,7 @@ app.use((error, _req, res, _next) => {
 });
 
 if (require.main === module) {
-    app.listen(port, () => console.log(`KoraPoint API listening on port ${port}`));
+    app.listen(port, () => console.log(`Bopstina Ventures API listening on port ${port}`));
 }
 
 module.exports = app;

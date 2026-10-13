@@ -1032,7 +1032,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 /* ============================================================
-   KoraPoint UX refresh — mobile-first hardware shop interface
+    Bopstina Ventures UX refresh — mobile-first hardware shop interface
    ============================================================ */
 html { scroll-behavior: smooth; }
 body {
@@ -1419,4 +1419,408 @@ body{background:radial-gradient(circle at 5% 0%,rgba(23,105,170,.13),transparent
   padding: 7px 10px;
   background: #fff7f8;
   font-weight: 700;
+}
+
+/* Accessible hardware-shop theme */
+:root {
+    --bg-ivory: #f3f6f3 !important;
+    --bg-ice: #f3f6f3 !important;
+    --bg-soft: #edf3ee !important;
+    --panel: #ffffff !important;
+    --panel-strong: #ffffff !important;
+    --surface: #ffffff !important;
+    --primary: #237a57 !important;
+    --primary-deep: #1b6245 !important;
+    --accent: #237a57 !important;
+    --accent-strong: #1b6245 !important;
+    --accent-soft: rgba(35, 122, 87, 0.1) !important;
+    --text: #1f2937 !important;
+    --muted: #596579 !important;
+    --border: #dce4de !important;
+}
+
+body {
+    background: linear-gradient(135deg, #f3f6f3 0%, #f3f6f3 72%, #edf3ee 100%) !important;
+    background-attachment: fixed;
+    color: #1f2937 !important;
+    font-family: Arial, 'Segoe UI', sans-serif;
+    font-size: 16px;
+}
+
+.login-screen {
+    background: #f3f6f3 !important;
+}
+.login-screen::before,
+.login-screen::after,
+.login-card::before {
+    display: none !important;
+    animation: none !important;
+}
+.login-layout {
+    border: 1px solid #dce4de !important;
+    border-radius: 16px !important;
+    background: #fff !important;
+    box-shadow: 0 12px 32px rgba(31, 41, 55, 0.08) !important;
+    animation: none !important;
+}
+.login-layout .login-card,
+.login-card {
+    background: #fff !important;
+}
+.login-visual {
+    background: #237a57 !important;
+}
+.login-layout .login-card input,
+.login-layout .login-card select,
+input,
+select,
+textarea {
+    border-color: #dce4de !important;
+    color: #1f2937;
+    font-size: 16px;
+}
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: #237a57 !important;
+    box-shadow: 0 0 0 3px rgba(35, 122, 87, 0.16) !important;
+}
+
+.btn-primary,
+.primary-btn,
+button.btn-primary,
+.checkout-submit-btn,
+.sell-add-btn:not(:disabled) {
+    min-height: 50px;
+    border: 1px solid #237a57 !important;
+    border-radius: 10px;
+    background: #237a57 !important;
+    color: #fff !important;
+    box-shadow: none !important;
+    font-size: 16px;
+    font-weight: 700;
+}
+.btn-primary:hover,
+button.btn-primary:hover,
+.sell-add-btn:not(:disabled):hover {
+    background: #1b6245 !important;
+    transform: none;
+}
+.btn-success {
+    min-height: 48px;
+    background: #15803d !important;
+    color: #fff !important;
+}
+.btn-danger {
+    min-height: 48px;
+    background: #b42318 !important;
+    color: #fff !important;
+}
+.btn-secondary {
+    min-height: 48px;
+    border: 1px solid #dce4de;
+    background: #fff;
+    color: #1f2937;
+}
+
+.stat-card,
+.product-card,
+.card,
+.panel,
+.table-container,
+.form-card,
+.product-table-shell,
+.sell-product-row {
+    border: 1px solid #dce4de !important;
+    border-radius: 10px !important;
+    background: #fff !important;
+    box-shadow: 0 2px 8px rgba(31, 41, 55, 0.045) !important;
+}
+.stat-card:hover,
+.product-card:hover,
+.card-hover:hover {
+    transform: none;
+    box-shadow: 0 3px 10px rgba(31, 41, 55, 0.07) !important;
+}
+.sidebar-link.active,
+.nav-item.active,
+.mobile-nav-item.active,
+.mobile-bottom-nav button.active {
+    color: #1b6245 !important;
+    background: #eaf3ed !important;
+    box-shadow: inset 3px 0 0 #237a57;
+}
+.mobile-bottom-nav {
+    border-top: 1px solid #dce4de !important;
+    background: #fff !important;
+}
+.mobile-bottom-nav button {
+    min-height: 54px;
+    color: #596579;
+    font-size: 14px;
+}
+.sell-search {
+    min-height: 54px;
+    border-color: #dce4de;
+    border-radius: 10px;
+    font-size: 17px;
+}
+.sell-search:focus {
+    border-color: #237a57;
+    box-shadow: 0 0 0 3px rgba(35, 122, 87, 0.14);
+}
+.category-scroll .filter-chip {
+    min-height: 44px;
+    border-color: #dce4de;
+    color: #1f2937;
+    font-size: 15px;
+}
+.sell-product-row {
+    min-height: 76px;
+    padding: 12px;
+}
+.sell-product-name {
+    color: #1f2937;
+    font-size: 16px;
+}
+.sell-product-meta {
+    color: #596579;
+    font-size: 14px;
+}
+.sell-add-btn {
+    min-width: 82px;
+    min-height: 48px;
+    border-radius: 9px;
+}
+.checkout-submit-btn {
+    min-height: 54px;
+}
+.mobile-cart-bar {
+    background: #237a57;
+    box-shadow: 0 5px 16px rgba(31, 41, 55, 0.16);
+}
+.mobile-cart-bar strong {
+    color: #fff !important;
+}
+.product-table th {
+    background: #f3f6f3;
+    color: #596579;
+    font-size: 13px;
+}
+.product-table td {
+    color: #1f2937;
+    font-size: 14px;
+}
+.product-table-price,
+.product-table-name-button:hover {
+    color: #237a57 !important;
+}
+.product-table tbody tr:hover {
+    background: #f3f6f3;
+}
+.pwa-install-card,
+.kora-install-card {
+    background: #fff !important;
+}
+.kora-install-card .btn-primary {
+    background: #237a57 !important;
+}
+
+@media (max-width: 639px) {
+    body {
+        background: #f3f6f3 !important;
+    }
+    main {
+        padding-bottom: 92px !important;
+    }
+    .sell-product-row {
+        gap: 9px;
+    }
+    .sell-add-btn {
+        min-width: 76px;
+        padding: 8px;
+    }
+    .mobile-cart-bar {
+        bottom: calc(76px + env(safe-area-inset-bottom));
+    }
+    .manager-reset-card {
+        border-radius: 10px;
+        background: #fff !important;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .login-layout,
+    .login-card,
+    .login-card h2,
+    .login-card > p,
+    .login-card > .space-y-3 {
+        animation: none !important;
+    }
+}
+
+.bg-amber-50 { background-color: #eaf3ed !important; }
+.bg-amber-100 { background-color: #dcece2 !important; }
+.bg-amber-500,
+.bg-amber-600 { background-color: #237a57 !important; }
+.text-amber-600,
+.text-amber-700,
+.text-amber-800,
+.text-amber-900 { color: #237a57 !important; }
+.border-amber-100,
+.border-amber-200 { border-color: #c9ddd0 !important; }
+.text-blue-600 { color: #237a57 !important; }
+.product-table-add {
+    border-color: #237a57;
+    background: #237a57;
+    color: #fff;
+}
+.product-table-add:hover:not(:disabled) {
+    border-color: #1b6245;
+    background: #1b6245;
+}
+.view-toggle button.active {
+    color: #1b6245;
+}
+
+.settings-page {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    width: 100% !important;
+    max-width: 840px !important;
+    margin: 0 auto !important;
+    gap: 14px !important;
+}
+.settings-page > * {
+    width: 100% !important;
+    grid-column: auto !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+.settings-page > .kora-install-card {
+    min-height: 0 !important;
+}
+.settings-page > .stat-card {
+    min-height: 0 !important;
+}
+
+.login-screen {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 12px !important;
+    min-height: 100vh;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+.login-layout {
+    flex: 0 0 auto;
+    min-height: min(640px, calc(100vh - 96px));
+}
+.login-footer {
+    width: min(100%, 1080px);
+    padding: 8px 16px;
+    color: #596579;
+    font-size: 14px;
+    line-height: 1.4;
+    text-align: center;
+}
+@media (max-width: 760px) {
+    .login-screen {
+        align-items: stretch !important;
+        justify-content: flex-start !important;
+        gap: 10px !important;
+        padding: 14px;
+    }
+    .login-layout {
+        min-height: auto;
+    }
+    .login-visual {
+        min-height: 280px;
+    }
+    .login-footer {
+        width: 100%;
+        padding: 6px 8px;
+    }
+}
+
+.login-layout {
+    min-height: 0 !important;
+    height: auto;
+    grid-template-columns: minmax(340px, 0.85fr) minmax(0, 1.15fr);
+}
+.login-visual {
+    min-height: 0 !important;
+    padding: 12px !important;
+    align-items: center;
+    justify-content: center;
+    background: #fff !important;
+}
+.login-visual-image {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    border-radius: 8px;
+    object-fit: contain;
+}
+@media (max-width: 760px) {
+    .login-layout {
+        grid-template-columns: 1fr;
+    }
+    .login-visual {
+        padding: 10px !important;
+    }
+    .login-visual-image {
+        max-height: none;
+    }
+}
+
+body,
+.login-screen {
+    background-color: #f3f6f3 !important;
+    background-image:
+        linear-gradient(rgba(243, 246, 243, 0.9), rgba(243, 246, 243, 0.9)),
+        url('../assets/bosptina%20logo.jpg') !important;
+    background-size: cover, min(560px, 70vw) auto;
+    background-position: center, center;
+    background-repeat: no-repeat;
+    background-attachment: fixed, fixed;
+}
+.brand-logo {
+    display: block;
+    width: 48px;
+    height: 48px;
+    flex: 0 0 auto;
+    border: 1px solid #dce4de;
+    border-radius: 8px;
+    background: #fff;
+    object-fit: contain;
+}
+.app-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.app-brand h2 {
+    min-width: 0;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+.login-brand-logo {
+    width: 88px;
+    height: 88px;
+    margin: 0 auto 16px;
+}
+.dashboard-brand-logo,
+.install-brand-logo {
+    width: 48px;
+    height: 48px;
+}
+.mobile-brand-logo {
+    width: 36px;
+    height: 36px;
 }

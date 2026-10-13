@@ -1,21 +1,21 @@
 {
-  "name": "KoraPoint POS",
-  "short_name": "KoraPoint",
+  "name": "Bopstina Ventures",
+  "short_name": "Bopstina Ventures",
   "description": "Point-of-sale workspace for growing businesses",
   "start_url": "../html/",
   "scope": "../",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#F3F6F3",
+  "theme_color": "#237A57",
   "orientation": "portrait-primary",
-  "id": "/KoraPoint/",
+  "id": "/html/",
   "categories": ["business", "finance", "productivity"],
   "icons": [
     {
-      "src": "../assets/korapoint-icon.svg",
+      "src": "../assets/bopstina-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

@@ -1,5 +1,5 @@
 For Windows, after PostgreSQL is installed and its `psql` command is on PATH, run `./powershell/start-api.ps1` to create a local `.env`, apply `sql/schema.sql`, and start the API automatically.
-# KoraPoint
+# Bopstina Ventures
 
 A browser-based point-of-sale app with a multi-tenant API foundation. Each company gets an isolated tenant, and each tenant can have multiple staff accounts.
 

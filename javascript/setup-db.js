@@ -9,7 +9,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 async function setupDatabase() {
     const schema = fs.readFileSync(path.join(__dirname, '..', 'sql', 'schema.sql'), 'utf8');
     await pool.query(schema);
-    console.log('KoraPoint database schema is ready');
+    console.log('Bopstina Ventures database schema is ready');
     await pool.end();
 }
 

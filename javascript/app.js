@@ -754,7 +754,7 @@ function downloadBackup() {
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `korapoint-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `bopstina-ventures-backup-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(link.href);
 }
@@ -1236,6 +1236,21 @@ function RegisterPanel({ sales }) {
     );
 }
 
+function BrandLogo({ className = '' }) {
+    return React.createElement('img', {
+        src: '/assets/bopstina-192.png',
+        alt: 'Bopstina Ventures logo',
+        className: `brand-logo ${className}`
+    });
+}
+
+function RegisterPage() {
+    const { sales } = useApp();
+    return React.createElement('div', { className: 'max-w-2xl' },
+        React.createElement(RegisterPanel, { sales })
+    );
+}
+
 // ---- Dashboard ----
 function Dashboard() {
     const { products, sales, currentUser } = useApp();
@@ -1292,7 +1307,10 @@ function Dashboard() {
 
     return React.createElement('div', { className: 'space-y-6' },
         React.createElement('div', { className: 'stat-card p-4 sm:p-5' },
-            React.createElement('p', { className: 'text-xs font-bold uppercase tracking-wide text-blue-600' }, 'KoraPoint'),
+            React.createElement('div', { className: 'flex items-center gap-3 mb-2' },
+                React.createElement(BrandLogo, { className: 'dashboard-brand-logo' }),
+                React.createElement('p', { className: 'text-sm font-bold text-green-800' }, 'Bopstina Ventures')
+            ),
             React.createElement('h2', { className: 'text-xl sm:text-2xl font-bold text-gray-800 mt-1' }, 'Welcome back, ', displayName, '! 👋'),
             React.createElement('p', { className: 'text-sm text-gray-500 mt-1' }, 'Here is how your shop is doing today.')
         ),
@@ -1306,7 +1324,6 @@ function Dashboard() {
             !isCashier && React.createElement(StatCard, { icon: '🔄', label: 'Recent Sales', value: recentSales.length,
                 sub: 'last 5 transactions', color: 'blue' })
         ),
-        !isCashier && React.createElement(RegisterPanel, { sales }),
         !isCashier && React.createElement('div', { className: 'stat-card p-4' },
             React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' },
                 '📊 Last 7 Days Sales'),
@@ -2024,7 +2041,7 @@ function SalesPage() {
 </style></head>
 <body>
     <div style="text-align:center;margin-bottom:12px;">
-        <h2 style="margin:0;">🏪 KoraPoint</h2>
+        <img src="/assets/bopstina-192.png" alt="Bopstina Ventures" style="width:112px;height:112px;object-fit:contain;" />
         <p style="margin:2px 0;font-size:0.8rem;color:#666;">${new Date(sale.date).toLocaleString()}</p>
     </div>
     <div class="line"></div>
@@ -2051,7 +2068,7 @@ win.print();
 
     const shareReceipt = async (sale) => {
         const receiptText = [
-            'KoraPoint Receipt',
+            'Bopstina Ventures Receipt',
             new Date(sale.date).toLocaleString(),
             `Customer: ${sale.customerName || 'Walk-in Customer'}`,
             ...sale.items.map(item => `${item.productName} x${item.quantity} ${formatCurrency(item.quantity * item.sellingPrice)}`),
@@ -2060,7 +2077,7 @@ win.print();
         ].join('\n');
         try {
             if (navigator.share) {
-                await navigator.share({ title: 'KoraPoint Receipt', text: receiptText });
+                await navigator.share({ title: 'Bopstina Ventures Receipt', text: receiptText });
                 return;
             }
             await navigator.clipboard.writeText(receiptText);
@@ -2439,15 +2456,15 @@ const downloadDaySales = () => {
     const csv = rows.map(row => row.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob); const link = document.createElement('a');
-    link.href = url; link.download = `KoraPoint-sales-${selectedDate}.csv`; link.click(); URL.revokeObjectURL(url);
+    link.href = url; link.download = `Bopstina-Ventures-sales-${selectedDate}.csv`; link.click(); URL.revokeObjectURL(url);
     showToast(`Sales for ${selectedDate} downloaded`);
 };
 
 const sendDailyReport = async () => {
     const recipient = reportEmail.trim();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) { showToast('Enter a valid report email address', 'error'); return; }
-    const body = [`KoraPoint sales report for ${selectedDate}`, `Revenue: ${formatCurrency(selectedTotal)}`, `Gross profit: ${formatCurrency(selectedProfit)}`, `Transactions: ${selectedSales.length}`].join('\n');
-    try { await apiRequestWithSession('/api/reports/email', { method:'POST', body:JSON.stringify({ recipient, subject:`KoraPoint sales report - ${selectedDate}`, report:body }) }); showToast('Daily report sent successfully'); }
+    const body = [`Bopstina Ventures sales report for ${selectedDate}`, `Revenue: ${formatCurrency(selectedTotal)}`, `Gross profit: ${formatCurrency(selectedProfit)}`, `Transactions: ${selectedSales.length}`].join('\n');
+    try { await apiRequestWithSession('/api/reports/email', { method:'POST', body:JSON.stringify({ recipient, subject:`Bopstina Ventures sales report - ${selectedDate}`, report:body }) }); showToast('Daily report sent successfully'); }
     catch(error) { showToast(error.message, 'error'); }
 };
 
@@ -2657,6 +2674,7 @@ if (isLogin || !currentUser || !hasSession) {
 return React.createElement('div', { className: 'login-screen' },
 React.createElement('div', { className: 'login-layout' },
 React.createElement('div', { className: 'login-card' },
+React.createElement(BrandLogo, { className: 'login-brand-logo' }),
 React.createElement('h2', { className: 'text-2xl font-bold text-center text-gray-800 mb-2' }, 'Bopstina Ventures'),
 React.createElement('p', { className: 'text-center text-gray-400 text-sm mb-6' }, 'Sign in to your business workspace'),
 authMessage && React.createElement('p', { role: 'alert', className: `text-center text-sm mb-3 ${authMessage.includes('...') ? 'text-amber-600' : 'text-rose-600'}` }, authMessage),
@@ -2685,21 +2703,15 @@ React.createElement('button', { type: 'button', onClick: () => { setAuthMode('lo
 ),
 React.createElement('div', { className: 'login-visual' },
 React.createElement('div', { className: 'login-visual-copy' },
-React.createElement('span', { className: 'login-visual-kicker' }, 'Bopstina Ventures'),
-React.createElement('h3', null, 'Everything your shop needs, in one place.'),
-React.createElement('p', null, 'Track stock, serve customers, and keep every sale moving.'),
-React.createElement('div', { className: 'hardware-scene', 'aria-hidden': 'true' },
-React.createElement('div', { className: 'hardware-shelf' }),
-React.createElement('div', { className: 'hardware-item hardware-box' }, 'NUTS'),
-React.createElement('div', { className: 'hardware-item hardware-paint' }, 'PAINT'),
-React.createElement('div', { className: 'hardware-item hardware-tools' }, 'TOOLS'),
-React.createElement('div', { className: 'hardware-item hardware-bag' }, 'BOPSTINA'),
-React.createElement('div', { className: 'hardware-tag' }, 'INVENTORY', React.createElement('strong', null, 'IN SYNC'))
-)
+React.createElement('img', {
+className: 'login-visual-image',
+src: '../assets/Bopstina%20login%20pic.jpg',
+alt: 'Bopstina Ventures hardware shop and product display'
+})
 ),
-React.createElement('div', { className: 'login-visual-footer' }, 'A calmer way to run the counter', React.createElement('span', null, '● LIVE'))
-)
-)
+),
+),
+React.createElement('footer', { className: 'login-footer' }, '© 2026 Bopstina Ventures')
 );
 }
 
@@ -2714,7 +2726,10 @@ className: 'text-sm text-rose-500 hover:text-rose-700 font-medium'
 ),
 React.createElement('div', { className: 'stat-card p-4 kora-install-card' },
 React.createElement('div', null,
-React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '📲 Install KoraPoint'),
+React.createElement('div', { className: 'flex items-center gap-3' },
+React.createElement(BrandLogo, { className: 'install-brand-logo' }),
+React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '📲 Install Bopstina Ventures')
+),
 React.createElement('p', { className: 'text-xs text-gray-400 mt-1' }, 'Install the POS on this device for faster access like an app.')
 ),
 React.createElement('button', {
@@ -2727,7 +2742,7 @@ onClick: async () => {
     try { event.prompt(); await event.userChoice; } catch (e) { console.warn('PWA install prompt failed', e); }
     window.__koraDeferredInstallPrompt = null;
   } else {
-    showToast(/iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'On iPhone/iPad: tap Share, then Add to Home Screen.' : 'Open your browser menu and choose Install KoraPoint or Add to Home screen.', 'info');
+    showToast(/iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'On iPhone/iPad: tap Share, then Add to Home Screen.' : 'Open your browser menu and choose Install Bopstina Ventures or Add to Home screen.', 'info');
   }
 }
 }, 'INSTALL APP')
@@ -2782,7 +2797,7 @@ React.createElement('span', { className: 'text-gray-400 whitespace-nowrap' }, ne
 ))
 ),
 React.createElement('div', { className: 'stat-card p-4' },
-React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' }, '📖 How KoraPoint works'),
+React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' }, '📖 How Bopstina Ventures works'),
 React.createElement('div', { className: 'grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600' },
 React.createElement('p', null, '1. Add products and set prices in Products.'),
 React.createElement('p', null, '2. Open the register before trading.'),
@@ -2867,7 +2882,7 @@ React.createElement('button', { onClick: handleAddUser, className: 'btn-primary'
 // ---- Guided Tour ----
 function Tour({ step, onNext, onBack, onClose, onNavigate }) {
     const steps = [
-        { page: 'dashboard', icon: '📊', title: 'Your business at a glance', text: 'See today\'s sales, stock levels, register status, and recent activity from one screen.' },
+        { page: 'dashboard', icon: '📊', title: 'Your business at a glance', text: 'See today\'s sales, stock levels, and recent activity from one screen.' },
         { page: 'sell', icon: '🛒', title: 'Sell quickly', text: 'Search products, choose a quantity, and add items to the cart with one tap.' },
         { page: 'products', icon: '📦', title: 'Manage your stock', text: 'Open the cart, choose a payment method, enter cash received, and see the change instantly.' },
         { page: 'reports', icon: '📈', title: 'Know how the shop is doing', text: 'Use Reports for daily closing, payment totals, profit, expenses, and best-selling products.' },
@@ -2926,18 +2941,18 @@ const closeTour = () => {
 };
 
 const isCashier = currentUser?.role === 'cashier';
-const restrictedPages = ['suppliers', 'expenses', 'reports'];
+const restrictedPages = ['suppliers', 'register', 'reports'];
 const navItems = [
 { id: 'dashboard', label: 'Home', icon: '🏠' },
 { id: 'sell', label: 'Sell', icon: '🛒' },
 { id: 'products', label: 'Stock', icon: '📦' },
 { id: 'sales', label: 'Sales', icon: '🧾' },
-{ id: 'expenses', label: 'Expenses', icon: '💰' },
+{ id: 'register', label: 'Register', icon: '💼' },
 { id: 'reports', label: 'Reports', icon: '📊' },
 { id: 'settings', label: 'Settings', icon: '⚙️' },
 ].filter(item => !isCashier || !restrictedPages.includes(item.id));
 const moreItems = [
-{ id: 'expenses', label: 'Expenses', icon: '💰' },
+{ id: 'register', label: 'Register', icon: '💼' },
 { id: 'reports', label: 'Reports', icon: '📊' },
 { id: 'stockActivity', label: 'Stock Activity', icon: '📦' },
 { id: 'settings', label: 'Settings', icon: '⚙️' },
@@ -2957,10 +2972,10 @@ case 'products':
 return React.createElement(ProductsPage);
 case 'sales':
 return React.createElement(SalesPage);
+case 'register':
+return React.createElement(RegisterPage);
 case 'stockActivity':
 return React.createElement(StockActivityPage);
-case 'expenses':
-return React.createElement(ExpensesPage);
 case 'reports':
 return React.createElement(ReportsPage);
 case 'settings':
@@ -2982,7 +2997,10 @@ React.createElement('div', {
 className: `absolute top-0 left-0 bottom-0 w-80 max-w-[88vw] bg-white shadow-2xl mobile-nav ${sidebarOpen ? 'open' : ''}`
 },
 React.createElement('div', { className: 'p-5 border-b border-gray-100' },
-React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, '🏪 ', currentCompany?.name || 'KoraPoint'),
+React.createElement('div', { className: 'app-brand' },
+React.createElement(BrandLogo),
+React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, currentCompany?.name || 'Bopstina Ventures')
+),
 React.createElement('p', { className: 'text-sm text-gray-500 mt-1' }, 'Simple shop management')
 ),
 React.createElement('div', { className: 'p-3' },
@@ -3015,7 +3033,10 @@ React.createElement('span', null, item.label)
 // Desktop sidebar
 const DesktopSidebar = () => React.createElement('div', { className: 'hidden lg:flex lg:flex-col lg:w-56 lg:flex-shrink-0 lg:bg-white lg:border-r lg:border-gray-100 lg:min-h-screen lg:sticky lg:top-0 lg:max-h-screen lg:overflow-y-auto' },
 React.createElement('div', { className: 'p-4 border-b border-gray-100' },
-React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, '🏪 ', currentCompany?.name || 'KoraPoint'),
+React.createElement('div', { className: 'app-brand' },
+React.createElement(BrandLogo),
+React.createElement('h2', { className: 'text-xl font-bold text-gray-800' }, currentCompany?.name || 'Bopstina Ventures')
+),
 React.createElement('p', { className: 'text-xs text-gray-400' }, currentCompany?.business_type || 'Point of Sale')
 ),
 React.createElement('nav', { className: 'p-3 space-y-0.5 flex-1' },
@@ -3031,7 +3052,7 @@ React.createElement('span', null, item.label)
 )
 ),
 React.createElement('div', { className: 'p-3 border-t border-gray-100 text-xs text-gray-400' },
-'© 2026 KoraPoint'
+'© 2026 Bopstina Ventures'
 )
 );
 
@@ -3057,7 +3078,10 @@ React.createElement('span', { className: 'hamburger-line top' }),
 React.createElement('span', { className: 'hamburger-line middle' }),
 React.createElement('span', { className: 'hamburger-line bottom' })
 ),
-React.createElement('h1', { className: 'text-lg font-bold text-gray-800' }, '🏪 KoraPoint')
+React.createElement('div', { className: 'flex items-center gap-2' },
+React.createElement(BrandLogo, { className: 'mobile-brand-logo' }),
+React.createElement('h1', { className: 'text-lg font-bold text-gray-800' }, 'Bopstina Ventures')
+)
 ),
 React.createElement('button', {
 onClick: () => setCartOpen(true),
@@ -3143,7 +3167,7 @@ function KoraPWAInstallCard() {
   }, []);
   const install = async () => {
     if (!window.koraInstallPrompt) {
-      alert('If Install App is not offered by your browser, open the browser menu and choose “Install KoraPoint” or “Add to Home screen”.');
+    alert('If Install App is not offered by your browser, open the browser menu and choose “Install Bopstina Ventures” or “Add to Home screen”.');
       return;
     }
     const prompt = window.koraInstallPrompt;
@@ -3154,8 +3178,8 @@ function KoraPWAInstallCard() {
   return React.createElement('div', { className: 'stat-card p-4 pwa-install-card' },
     React.createElement('div', { className: 'flex items-center justify-between gap-3 flex-wrap' },
       React.createElement('div', null,
-        React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '📲 Install KoraPoint'),
-        React.createElement('p', { className: 'text-xs text-gray-400 mt-1' }, installed ? 'KoraPoint is installed on this device.' : 'Install the POS for faster access like an app.')
+        React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '📲 Install Bopstina Ventures'),
+        React.createElement('p', { className: 'text-xs text-gray-400 mt-1' }, installed ? 'Bopstina Ventures is installed on this device.' : 'Install the POS for faster access like an app.')
       ),
       installed ? React.createElement('span', { className: 'pwa-installed-badge' }, '✓ Installed') :
       React.createElement('button', { onClick: install, className: 'btn-primary text-sm whitespace-nowrap' }, 'Install App')
