@@ -1185,70 +1185,12 @@ function CartSidebar({ isOpen, onClose }) {
     );
 }
 
-// ---- Register ----
-function RegisterPanel({ sales }) {
-    const { register, openRegister, closeRegister, showToast } = useApp();
-    const [cashInput, setCashInput] = useState('');
-    const today = new Date().toLocaleDateString('en-CA');
-    const cashSales = sales.filter(s => isActiveSale(s) && (s.saleDate || new Date(s.date).toLocaleDateString('en-CA')) === today &&
-        (s.paymentMethod || 'Cash') === 'Cash');
-    const cashCollected = cashSales.reduce((sum, sale) => sum + (sale.cashReceived || sale.total), 0);
-    const expectedCash = (register.openingCash || 0) + cashCollected;
-
-    const handleOpen = () => {
-        if (Number(cashInput) < 0) { showToast('Opening cash cannot be negative', 'error'); return; }
-        openRegister(cashInput);
-        setCashInput('');
-    };
-
-    const handleClose = () => {
-        if (cashInput === '') { showToast('Enter the cash counted at closing', 'error'); return; }
-        closeRegister(cashInput);
-        setCashInput('');
-    };
-
-    return React.createElement('div', { className: 'stat-card p-4 space-y-3' },
-        React.createElement('div', { className: 'flex items-center justify-between' },
-            React.createElement('div', null,
-                React.createElement('p', { className: 'text-sm font-semibold text-gray-700' }, '💼 Register'),
-                React.createElement('p', { className: 'text-xs text-gray-400' }, register.isOpen ? 'Open for business' : 'Closed')
-            ),
-            React.createElement('span', { className: `badge-stock ${register.isOpen ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'}` },
-                register.isOpen ? 'OPEN' : 'CLOSED')
-        ),
-        register.isOpen ? React.createElement('div', { className: 'space-y-2' },
-            React.createElement('div', { className: 'flex justify-between text-sm' },
-                React.createElement('span', { className: 'text-gray-500' }, 'Expected cash'),
-                React.createElement('strong', null, formatCurrency(expectedCash))
-            ),
-            React.createElement('div', { className: 'flex gap-2' },
-                React.createElement('input', { type: 'number', min: 0, step: '0.01', value: cashInput,
-                    onChange: e => setCashInput(e.target.value), placeholder: 'Cash counted (GHS)',
-                    className: 'flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
-                React.createElement('button', { onClick: handleClose, className: 'btn-danger text-sm' }, 'Close Register')
-            )
-        ) : React.createElement('div', { className: 'flex gap-2' },
-            React.createElement('input', { type: 'number', min: 0, step: '0.01', value: cashInput,
-                onChange: e => setCashInput(e.target.value), placeholder: 'Opening cash (GHS)',
-                className: 'flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm' }),
-            React.createElement('button', { onClick: handleOpen, className: 'btn-success text-sm' }, 'Open Register')
-        )
-    );
-}
-
 function BrandLogo({ className = '' }) {
     return React.createElement('img', {
         src: '/assets/bopstina-192.png',
         alt: 'Bopstina Ventures logo',
         className: `brand-logo ${className}`
     });
-}
-
-function RegisterPage() {
-    const { sales } = useApp();
-    return React.createElement('div', { className: 'max-w-2xl' },
-        React.createElement(RegisterPanel, { sales })
-    );
 }
 
 // ---- Dashboard ----
@@ -2800,7 +2742,7 @@ React.createElement('div', { className: 'stat-card p-4' },
 React.createElement('p', { className: 'text-sm font-semibold text-gray-700 mb-2' }, '📖 How Bopstina Ventures works'),
 React.createElement('div', { className: 'grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-600' },
 React.createElement('p', null, '1. Add products and set prices in Products.'),
-React.createElement('p', null, '2. Open the register before trading.'),
+React.createElement('p', null, '2. Set item quantities and review the cart total before checkout.'),
 React.createElement('p', null, '3. Add items to the cart and complete checkout.'),
 React.createElement('p', null, '4. Sales automatically reduce stock.'),
 React.createElement('p', null, '5. Record purchases to increase stock.'),
@@ -2941,18 +2883,16 @@ const closeTour = () => {
 };
 
 const isCashier = currentUser?.role === 'cashier';
-const restrictedPages = ['suppliers', 'register', 'reports'];
+const restrictedPages = ['suppliers', 'reports'];
 const navItems = [
 { id: 'dashboard', label: 'Home', icon: '🏠' },
 { id: 'sell', label: 'Sell', icon: '🛒' },
 { id: 'products', label: 'Stock', icon: '📦' },
 { id: 'sales', label: 'Sales', icon: '🧾' },
-{ id: 'register', label: 'Register', icon: '💼' },
 { id: 'reports', label: 'Reports', icon: '📊' },
 { id: 'settings', label: 'Settings', icon: '⚙️' },
 ].filter(item => !isCashier || !restrictedPages.includes(item.id));
 const moreItems = [
-{ id: 'register', label: 'Register', icon: '💼' },
 { id: 'reports', label: 'Reports', icon: '📊' },
 { id: 'stockActivity', label: 'Stock Activity', icon: '📦' },
 { id: 'settings', label: 'Settings', icon: '⚙️' },
@@ -2972,8 +2912,6 @@ case 'products':
 return React.createElement(ProductsPage);
 case 'sales':
 return React.createElement(SalesPage);
-case 'register':
-return React.createElement(RegisterPage);
 case 'stockActivity':
 return React.createElement(StockActivityPage);
 case 'reports':
