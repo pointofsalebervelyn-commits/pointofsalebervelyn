@@ -844,6 +844,10 @@ function ProductCard({ product, onEdit, onDelete, onAddToCart, onAdjustStock, cl
                 React.createElement('p', { className: 'font-semibold text-gray-800 text-sm truncate' }, product
                     .name),
                 React.createElement('p', { className: 'text-xs text-gray-400 truncate' }, product.category),
+                (product.colorName || product.colorHex) && React.createElement('span', { className: 'product-color-label' },
+                    React.createElement('i', { className: 'product-color-dot', style: { backgroundColor: product.colorHex || '#808080' }, 'aria-hidden': true }),
+                    product.colorName || product.colorHex
+                ),
                 React.createElement('div', { className: 'flex items-center gap-2 mt-0.5 flex-wrap' },
                     React.createElement('span', { className: 'text-sm font-bold text-amber-600' }, formatCurrency(product
                         .sellingPrice)),
@@ -898,12 +902,25 @@ function ProductTable({ products, onEdit, onDelete, onAddToCart, onAdjustStock }
                     const statusText = outOfStock ? 'Out of Stock' : lowStock ? 'Low Stock' : 'In Stock';
                     return React.createElement('tr', { key: product.id, className: outOfStock ? 'is-out-of-stock' : '' },
                         React.createElement('td', { className: 'product-table-name' },
-                            React.createElement('button', {
-                                type: 'button',
-                                className: 'product-table-name-button',
-                                onClick: () => onAddToCart(product),
-                                title: `Add ${product.name} to cart`
-                            }, product.name)
+                            React.createElement('div', { className: 'product-table-product' },
+                                React.createElement('span', { className: 'product-table-thumbnail' },
+                                    typeof product.image === 'string' && (product.image.startsWith('data:image/') || product.image.startsWith('http'))
+                                        ? React.createElement('img', { src: product.image, alt: '', loading: 'lazy' })
+                                        : product.image || '📦'
+                                ),
+                                React.createElement('div', { className: 'product-table-product-copy' },
+                                    React.createElement('button', {
+                                        type: 'button',
+                                        className: 'product-table-name-button',
+                                        onClick: () => onAddToCart(product),
+                                        title: `Add ${product.name} to cart`
+                                    }, product.name),
+                                    (product.colorName || product.colorHex) && React.createElement('span', { className: 'product-color-label' },
+                                        React.createElement('i', { className: 'product-color-dot', style: { backgroundColor: product.colorHex || '#808080' }, 'aria-hidden': true }),
+                                        product.colorName || product.colorHex
+                                    )
+                                )
+                            )
                         ),
                         React.createElement('td', { className: 'product-table-brand', title: product.brand || '' }, product.brand || '—'),
                         React.createElement('td', { className: 'product-table-category', title: product.category || '' }, product.category || '—'),
@@ -1517,6 +1534,7 @@ function ProductsPage() {
     const [search, setSearch] = useState('');
     const [category, setCategory] = useState('All');
     const [sort, setSort] = useState('name');
+    const [viewMode, setViewMode] = useState('list');
     const [editing, setEditing] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
     const [scannerOpen, setScannerOpen] = useState(false);
@@ -1593,16 +1611,28 @@ function ProductsPage() {
             React.createElement('button', {
                 onClick: () => setScannerOpen(true),
                 className: 'btn-secondary text-sm min-h-[42px]'
-            }, '📷 Scan')
+            }, '📷 Scan'),
+            React.createElement('div', { className: 'view-toggle', role: 'group', 'aria-label': 'Inventory view' },
+                React.createElement('button', { type: 'button', className: viewMode === 'list' ? 'active' : '', onClick: () => setViewMode('list'), 'aria-pressed': viewMode === 'list', title: 'List view' }, 'List'),
+                React.createElement('button', { type: 'button', className: viewMode === 'grid' ? 'active' : '', onClick: () => setViewMode('grid'), 'aria-pressed': viewMode === 'grid', title: 'Grid view' }, 'Grid')
+            )
         ),
-        // Products always use the compact one-line table layout to prevent overcrowding.
-        React.createElement(ProductTable, {
-            products: filtered,
-            onEdit: (product) => setEditing(product),
-            onDelete: handleDelete,
-            onAddToCart: addToCart,
-            onAdjustStock: handleAdjustStock
-        }),
+        viewMode === 'list'
+            ? React.createElement(ProductTable, {
+                products: filtered,
+                onEdit: (product) => setEditing(product),
+                onDelete: handleDelete,
+                onAddToCart: addToCart,
+                onAdjustStock: handleAdjustStock
+            })
+            : React.createElement('div', { className: 'product-grid' }, filtered.map(product => React.createElement(ProductCard, {
+                key: product.id,
+                product,
+                onEdit: (item) => setEditing(item),
+                onDelete: handleDelete,
+                onAddToCart: addToCart,
+                onAdjustStock: handleAdjustStock
+            }))),
         filtered.length === 0 && React.createElement('p', { className: 'text-center text-gray-400 py-8' },
             'No products found'),
         // Add modal
@@ -1636,11 +1666,13 @@ function ProductsPage() {
 
 // ---- Product Form ----
 function ProductForm({ product, onClose, mode }) {
-    const { addProduct, updateProduct, showToast } = useApp();
+    const { products, addProduct, updateProduct, showToast } = useApp();
     const getDefaultForm = (selectedProduct = null) => ({
         name: selectedProduct?.name || '',
         image: selectedProduct?.image || '📦',
-        category: selectedProduct?.category || 'Cement',
+        category: selectedProduct?.category || '',
+        colorName: selectedProduct?.colorName || '',
+        colorHex: selectedProduct?.colorHex || '#808080',
         materialType: selectedProduct?.materialType || '',
         supplier: selectedProduct?.supplier || '',
         buyingPrice: (Number(selectedProduct?.buyingPrice) > 0 ? String(selectedProduct.buyingPrice) : ''),
@@ -1689,10 +1721,7 @@ function ProductForm({ product, onClose, mode }) {
         reader.readAsDataURL(file);
     });
 
-    const categories = ['Cement', 'Nails', 'Paints', 'Electrical materials', 'Plumbing materials', 'Roofing materials',
-        'Tools', 'Wood materials', 'Steel materials', 'Pipes', 'Tiles', 'Building blocks', 'Safety equipment',
-        'Adhesives', 'Other'
-    ];
+    const categories = [...new Set(products.map(item => String(item.category || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const units = ['piece', 'box', 'bag', 'meter', 'carton', 'bottle', 'can', 'roll', 'sheet', 'kg', 'g', 'L', 'mL'];
 
     const handleSubmit = async (e) => {
@@ -1801,11 +1830,34 @@ function ProductForm({ product, onClose, mode }) {
             React.createElement('div', null,
                 React.createElement('label', { className: 'block text-xs font-medium text-gray-500 mb-0.5' },
                     'Category *'),
-                React.createElement('select', {
+                React.createElement('input', {
+                    type: 'text',
+                    list: 'product-category-options',
                     value: form.category,
                     onChange: (e) => setForm(prev => ({ ...prev, category: e.target.value })),
-                    className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm'
-                }, categories.map(c => React.createElement('option', { key: c, value: c }, c)))
+                    className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
+                    placeholder: 'Choose or enter a category',
+                    required: true
+                }),
+                React.createElement('datalist', { id: 'product-category-options' }, categories.map(c => React.createElement('option', { key: c, value: c })))
+            ),
+            React.createElement('div', null,
+                React.createElement('label', { className: 'block text-xs font-medium text-gray-500 mb-0.5' }, 'Product Color'),
+                React.createElement('div', { className: 'product-color-input' },
+                    React.createElement('input', {
+                        type: 'color',
+                        value: form.colorHex,
+                        onChange: (e) => setForm(prev => ({ ...prev, colorHex: e.target.value })),
+                        'aria-label': 'Choose product color'
+                    }),
+                    React.createElement('input', {
+                        type: 'text',
+                        value: form.colorName,
+                        onChange: (e) => setForm(prev => ({ ...prev, colorName: e.target.value })),
+                        className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
+                        placeholder: 'Shade name, e.g. Ocean Blue'
+                    })
+                )
             ),
             React.createElement('div', null,
                 React.createElement('label', { className: 'block text-xs font-medium text-gray-500 mb-0.5' },

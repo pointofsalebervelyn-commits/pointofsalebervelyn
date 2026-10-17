@@ -585,6 +585,10 @@ body {
 .product-table tbody tr:hover { background: #fffbeb; }
 .product-table tbody tr.is-out-of-stock { background: #fffafa; }
 .product-table-name { min-width: 180px; max-width: 280px; }
+.product-table-product { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.product-table-thumbnail { width: 38px; height: 38px; display: inline-flex; flex: 0 0 38px; align-items: center; justify-content: center; overflow: hidden; border: 1px solid #e5e7eb; border-radius: 7px; background: #f8fafc; font-size: 1.2rem; }
+.product-table-thumbnail img { width: 100%; height: 100%; object-fit: cover; }
+.product-table-product-copy { min-width: 0; }
 .product-table-name-button {
     max-width: 280px;
     overflow: hidden;
@@ -599,6 +603,11 @@ body {
     cursor: pointer;
 }
 .product-table-name-button:hover { color: #b45309; text-decoration: underline; }
+.product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.product-color-label { display: inline-flex; align-items: center; gap: 5px; color: #64748b; font-size: 0.68rem; line-height: 1.2; }
+.product-color-dot { width: 12px; height: 12px; flex: 0 0 12px; border: 1px solid rgba(15, 23, 42, 0.2); border-radius: 50%; }
+.product-color-input { display: flex; align-items: center; gap: 8px; }
+.product-color-input input[type="color"] { width: 44px; height: 40px; flex: 0 0 44px; padding: 3px; border: 1px solid #e5e7eb; border-radius: 7px; background: white; }
 .product-table-brand, .product-table-category { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 .product-table-price { color: #b45309 !important; font-weight: 800; }
 .product-table-stock { font-weight: 700; color: #334155 !important; }

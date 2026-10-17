@@ -1,9 +1,9 @@
-const CACHE_NAME = 'bopstina-shell-v8';
+const CACHE_NAME = 'bopstina-shell-v9';
 const APP_SHELL = [
   '/html/',
   '/html/index.html',
   '/css/style.css',
-  '/javascript/app.js?v=8',
+  '/javascript/app.js?v=9',
   '/javascript/config.js',
   '/manifest.webmanifest',
   '/assets/bopstina-192.png',

@@ -192,7 +192,7 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
     res.json({ user: req.user, company: req.company });
 });
 
-const productSelect = `SELECT id, name, image, category, group_id AS "groupId", product_code AS "productCode", material_type AS "materialType", supplier,
+const productSelect = `SELECT id, name, image, category, color_name AS "colorName", color_hex AS "colorHex", group_id AS "groupId", product_code AS "productCode", material_type AS "materialType", supplier,
     buying_price AS "buyingPrice", selling_price AS "sellingPrice", wholesale_price AS "wholesalePrice", quantity, min_stock_level AS "minStockLevel",
     unit, description, barcode, sku, is_active AS "isActive", created_at AS "dateAdded", updated_at AS "updatedAt" FROM products`;
 const userSelect = `SELECT id, name, email, role, is_active AS "isActive", created_at AS "createdAt" FROM users`;
@@ -256,8 +256,8 @@ app.post('/api/products', requireAuth, async (req, res, next) => {
     const data = req.body || {};
     if (!String(data.name || '').trim()) return res.status(400).json({ error: 'Product name is required' });
     try {
-        const result = await pool.query(`INSERT INTO products (tenant_id, name, image, category, group_id, product_code, material_type, supplier, buying_price, selling_price, wholesale_price, quantity, min_stock_level, unit, description, barcode)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`, [req.user.tenant_id, data.name.trim(), data.image || '', data.category || '', data.groupId || null, data.productCode || null, data.materialType || '', data.supplier || '', Number(data.buyingPrice) || 0, Number(data.sellingPrice) || 0, data.wholesalePrice == null || data.wholesalePrice === '' ? null : Number(data.wholesalePrice), Number(data.quantity) || 0, Number(data.minStockLevel) || 0, data.unit || 'piece', data.description || '', data.barcode || null]);
+        const result = await pool.query(`INSERT INTO products (tenant_id, name, image, category, color_name, color_hex, group_id, product_code, material_type, supplier, buying_price, selling_price, wholesale_price, quantity, min_stock_level, unit, description, barcode)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING id`, [req.user.tenant_id, data.name.trim(), data.image || '', data.category || '', data.colorName || '', data.colorHex || '#808080', data.groupId || null, data.productCode || null, data.materialType || '', data.supplier || '', Number(data.buyingPrice) || 0, Number(data.sellingPrice) || 0, data.wholesalePrice == null || data.wholesalePrice === '' ? null : Number(data.wholesalePrice), Number(data.quantity) || 0, Number(data.minStockLevel) || 0, data.unit || 'piece', data.description || '', data.barcode || null]);
         await pool.query('INSERT INTO audit_logs (tenant_id, user_id, action, details) VALUES ($1,$2,$3,$4)', [req.user.tenant_id, req.user.id, 'Product added', data.name]);
         const product = await pool.query(`${productSelect} WHERE id = $1 AND tenant_id = $2`, [result.rows[0].id, req.user.tenant_id]);
         res.status(201).json({ product: product.rows[0] });
@@ -267,7 +267,7 @@ app.post('/api/products', requireAuth, async (req, res, next) => {
 app.patch('/api/products/:id', requireAuth, async (req, res, next) => {
     const data = req.body || {};
     try {
-        const result = await pool.query(`UPDATE products SET name=COALESCE($1,name), image=COALESCE($2,image), category=COALESCE($3,category), material_type=COALESCE($4,material_type), supplier=COALESCE($5,supplier), buying_price=COALESCE($6,buying_price), selling_price=COALESCE($7,selling_price), min_stock_level=COALESCE($8,min_stock_level), unit=COALESCE($9,unit), description=COALESCE($10,description), barcode=COALESCE($11,barcode) WHERE id=$12 AND tenant_id=$13 RETURNING id`, [data.name, data.image, data.category, data.materialType, data.supplier, data.buyingPrice, data.sellingPrice, data.minStockLevel, data.unit, data.description, data.barcode, req.params.id, req.user.tenant_id]);
+        const result = await pool.query(`UPDATE products SET name=COALESCE($1,name), image=COALESCE($2,image), category=COALESCE($3,category), material_type=COALESCE($4,material_type), supplier=COALESCE($5,supplier), buying_price=COALESCE($6,buying_price), selling_price=COALESCE($7,selling_price), min_stock_level=COALESCE($8,min_stock_level), unit=COALESCE($9,unit), description=COALESCE($10,description), barcode=COALESCE($11,barcode), color_name=COALESCE($12,color_name), color_hex=COALESCE($13,color_hex) WHERE id=$14 AND tenant_id=$15 RETURNING id`, [data.name, data.image, data.category, data.materialType, data.supplier, data.buyingPrice, data.sellingPrice, data.minStockLevel, data.unit, data.description, data.barcode, data.colorName, data.colorHex, req.params.id, req.user.tenant_id]);
         if (!result.rowCount) return res.status(404).json({ error: 'Product not found' });
         await addAudit(pool, req.user.tenant_id, req.user.id, 'Product updated', req.params.id);
         const product = await pool.query(`${productSelect} WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.user.tenant_id]);
@@ -484,7 +484,12 @@ app.use((error, _req, res, _next) => {
 });
 
 if (require.main === module) {
-    app.listen(port, () => console.log(`Bopstina Ventures API listening on port ${port}`));
+    pool.query('ALTER TABLE products ADD COLUMN IF NOT EXISTS color_name TEXT, ADD COLUMN IF NOT EXISTS color_hex TEXT')
+        .then(() => app.listen(port, () => console.log(`Bopstina Ventures API listening on port ${port}`)))
+        .catch(error => {
+            console.error('Product color database migration failed:', error.message);
+            process.exitCode = 1;
+        });
 }
 
 module.exports = app;
