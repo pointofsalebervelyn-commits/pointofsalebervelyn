@@ -1137,6 +1137,8 @@ button { min-height: 42px; }
 .sell-product-icon img { width:100%; height:100%; object-fit:cover; }
 .sell-product-info { min-width:0; flex:1; }
 .sell-product-name { font-weight:700; color:#1f2937; line-height:1.25; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sell-product-color { display:flex; align-items:center; gap:5px; margin-top:3px; color:#526274; font-size:.72rem; line-height:1.2; }
+.sell-product-color .product-color-dot { width:13px; height:13px; flex-basis:13px; }
 .sell-product-meta { color:#64748b; font-size:.78rem; margin-top:4px; }
 .stock-low { color:#b45309; font-weight:700; }
 .stock-out { color:#dc2626; font-weight:700; }

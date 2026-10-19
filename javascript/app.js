@@ -16,6 +16,85 @@ const DB = {
 const API_BASE = window.NEXATILL_API_URL || 'http://localhost:3000';
 const SESSION_KEY = 'nexatill_session';
 
+const COLOR_ALIASES = [
+    ['ocean blue', '#0077be'], ['sky blue', '#87ceeb'], ['navy blue', '#000080'], ['royal blue', '#4169e1'],
+    ['light blue', '#add8e6'], ['dark blue', '#00008b'], ['forest green', '#228b22'], ['lime green', '#32cd32'],
+    ['light green', '#90ee90'], ['dark green', '#006400'], ['hot pink', '#ff69b4'], ['rose pink', '#f4c2c2'],
+    ['crimson', '#dc143c'], ['maroon', '#800000'], ['orange', '#ffa500'], ['yellow', '#ffff00'],
+    ['green', '#008000'], ['lime', '#00ff00'], ['teal', '#008080'], ['turquoise', '#40e0d0'],
+    ['cyan', '#00ffff'], ['blue', '#0000ff'], ['navy', '#000080'], ['purple', '#800080'],
+    ['violet', '#ee82ee'], ['magenta', '#ff00ff'], ['pink', '#ffc0cb'], ['brown', '#a52a2a'],
+    ['black', '#000000'], ['white', '#ffffff'], ['gray', '#808080'], ['grey', '#808080'],
+    ['silver', '#c0c0c0'], ['gold', '#ffd700'], ['beige', '#f5f5dc']
+].sort((a, b) => b[0].length - a[0].length);
+
+function colorNameToHex(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return null;
+    const directHex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (directHex) {
+        const digits = directHex[1];
+        return `#${digits.length === 3 ? [...digits].map(character => character + character).join('') : digits}`.toLowerCase();
+    }
+    const normalized = text.replace(/[^a-z0-9]+/g, ' ');
+    const alias = COLOR_ALIASES.find(([name]) => new RegExp(`(^|\\s)${name.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}(\\s|$)`, 'i').test(normalized));
+    if (alias) return alias[1];
+    const compact = text.replace(/\s+/g, '');
+    if (!window.CSS?.supports?.('color', text) && !window.CSS?.supports?.('color', compact)) return null;
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    context.fillStyle = '#010203';
+    context.fillStyle = window.CSS.supports('color', text) ? text : compact;
+    const resolved = context.fillStyle;
+    if (/^#[0-9a-f]{6}$/i.test(resolved)) return resolved.toLowerCase();
+    const rgb = resolved.match(/^rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/i);
+    return rgb ? `#${rgb.slice(1, 4).map(channel => Number(channel).toString(16).padStart(2, '0')).join('')}` : null;
+}
+
+function getColorSearchTags(hex) {
+    const normalized = colorNameToHex(hex);
+    if (!normalized) return [];
+    const red = parseInt(normalized.slice(1, 3), 16) / 255;
+    const green = parseInt(normalized.slice(3, 5), 16) / 255;
+    const blue = parseInt(normalized.slice(5, 7), 16) / 255;
+    const max = Math.max(red, green, blue);
+    const min = Math.min(red, green, blue);
+    const delta = max - min;
+    const lightness = (max + min) / 2;
+    const saturation = delta === 0 ? 0 : delta / (1 - Math.abs(2 * lightness - 1));
+    let hue = 0;
+    if (delta) {
+        if (max === red) hue = 60 * (((green - blue) / delta) % 6);
+        else if (max === green) hue = 60 * ((blue - red) / delta + 2);
+        else hue = 60 * ((red - green) / delta + 4);
+    }
+    hue = (hue + 360) % 360;
+    const family = saturation < 0.12
+        ? lightness < 0.14 ? 'black' : lightness > 0.9 ? 'white' : 'gray'
+        : hue < 15 || hue >= 345 ? 'red'
+        : hue < 40 ? 'orange'
+        : hue < 70 ? 'yellow'
+        : hue < 165 ? 'green'
+        : hue < 195 ? 'cyan'
+        : hue < 255 ? 'blue'
+        : hue < 290 ? 'purple'
+        : hue < 345 ? 'pink' : 'red';
+    return [family, ...(lightness < 0.28 ? ['dark'] : lightness > 0.72 ? ['light'] : [])];
+}
+
+function productMatchesSearch(product, query) {
+    const terms = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return true;
+    const searchable = [
+        product.name, product.barcode, product.sku, product.productCode, product.category,
+        product.colorName, product.colorHex, product.materialType, product.supplier,
+        product.unit, product.description, product.brand, product.model,
+        ...getColorSearchTags(product.colorHex)
+    ].filter(Boolean).join(' ').toLowerCase();
+    return terms.every(term => searchable.includes(term));
+}
+
 async function apiRequest(path, options = {}, token = '') {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), Number(options.timeoutMs) || 15000);
@@ -1780,15 +1859,14 @@ function SellPage() {
     const { products, addToCart, cart, showToast, quickSellItems, saveQuickSell } = useApp();
     const [search, setSearch] = useState('');
     const [category, setCategory] = useState('All');
-    const categories = useMemo(() => ['All', ...new Set(products.map(p => p.category).filter(Boolean))], [products]);
+    const categories = useMemo(() => ['All', ...new Set(products.map(p => String(p.category || '').trim()).filter(Boolean))], [products]);
     const quickSellIds = (quickSellItems || []).map(item => item.productId || item).filter(Boolean);
     const quickProducts = quickSellIds.map(id => products.find(product => product.id === id)).filter(Boolean);
     const filtered = useMemo(() => {
-        const q = search.trim().toLowerCase();
         return products.filter(p => {
-            const matchesSearch = !q || [p.name, p.barcode, p.sku, p.productCode, p.category, p.materialType, p.supplier, p.unit]
-                .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
-            return matchesSearch && (category === 'All' || p.category === category);
+            const matchesSearch = productMatchesSearch(p, search);
+            const matchesCategory = category === 'All' || String(p.category || '').trim().toLowerCase() === category.toLowerCase();
+            return matchesSearch && matchesCategory;
         }).sort((a,b) => a.name.localeCompare(b.name));
     }, [products, search, category]);
     const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -1806,7 +1884,7 @@ function SellPage() {
             React.createElement('span', { className: 'sell-search-icon' }, '🔍'),
             React.createElement('input', {
                 value: search, onChange: e => setSearch(e.target.value),
-                placeholder: 'Search cement, nails, rods, roofing sheets...',
+                placeholder: 'Search product, color, category, barcode...',
                 className: 'sell-search', autoComplete: 'off', 'aria-label': 'Search products'
             })
         ),
@@ -1863,6 +1941,10 @@ function SellPage() {
                         ),
                         React.createElement('div', { className: 'sell-product-info' },
                             React.createElement('div', { className: 'sell-product-name' }, p.name),
+                            (p.colorName || p.colorHex) && React.createElement('div', { className: 'sell-product-color' },
+                                React.createElement('span', { className: 'product-color-dot', style: { backgroundColor: colorNameToHex(p.colorHex) || '#808080' } }),
+                                React.createElement('span', null, p.colorName || p.colorHex)
+                            ),
                             React.createElement('div', { className: 'sell-product-meta' },
                                 formatCurrency(p.sellingPrice), ' · ',
                                 React.createElement('span', { className: out ? 'stock-out' : Number(p.quantity) <= Number(p.minStockLevel) ? 'stock-low' : '' },
@@ -1985,24 +2067,8 @@ function ProductsPage() {
 
     const filtered = useMemo(() => {
         const normalizedCategory = String(category || '').trim();
-        const normalizedSearch = String(search || '').trim().toLowerCase();
         let result = products.filter(product => {
-            const searchable = [
-                product.name,
-                product.barcode,
-                product.sku,
-                product.productCode,
-                product.category,
-                product.colorName,
-                product.colorHex,
-                product.materialType,
-                product.supplier,
-                product.unit,
-                product.description,
-                product.brand,
-                product.model
-            ].filter(Boolean).join(' ').toLowerCase();
-            const matchesSearch = !normalizedSearch || searchable.includes(normalizedSearch);
+            const matchesSearch = productMatchesSearch(product, search);
             const matchesCategory = normalizedCategory === 'All' || String(product.category || '').trim().toLowerCase() === normalizedCategory.toLowerCase();
             return matchesSearch && matchesCategory;
         });
@@ -2311,21 +2377,28 @@ function ProductForm({ product, onClose, mode }) {
                 React.createElement('datalist', { id: 'product-category-options' }, categories.map(c => React.createElement('option', { key: c, value: c })))
             ),
             React.createElement('div', null,
-                React.createElement('label', { className: 'block text-xs font-medium text-gray-500 mb-0.5' }, 'Product Color'),
+                React.createElement('label', { className: 'block text-xs font-medium text-gray-500 mb-0.5' }, 'Color name and swatch'),
                 React.createElement('div', { className: 'product-color-input' },
+                    React.createElement('input', {
+                        type: 'text',
+                        list: 'product-color-options',
+                        value: form.colorName,
+                        onChange: (e) => {
+                            const colorName = e.target.value;
+                            const matchingHex = colorNameToHex(colorName);
+                            setForm(prev => ({ ...prev, colorName, colorHex: matchingHex || prev.colorHex }));
+                        },
+                        className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
+                        placeholder: 'Type a color, e.g. Ocean Blue or #1677cc',
+                        'aria-label': 'Product color name'
+                    }),
                     React.createElement('input', {
                         type: 'color',
                         value: form.colorHex,
                         onChange: (e) => setForm(prev => ({ ...prev, colorHex: e.target.value })),
                         'aria-label': 'Choose product color'
                     }),
-                    React.createElement('input', {
-                        type: 'text',
-                        value: form.colorName,
-                        onChange: (e) => setForm(prev => ({ ...prev, colorName: e.target.value })),
-                        className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
-                        placeholder: 'Shade name, e.g. Ocean Blue'
-                    })
+                    React.createElement('datalist', { id: 'product-color-options' }, COLOR_ALIASES.map(([name]) => React.createElement('option', { key: name, value: name })))
                 )
             ),
             React.createElement('div', null,
