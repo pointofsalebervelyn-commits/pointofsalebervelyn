@@ -95,6 +95,13 @@ function productMatchesSearch(product, query) {
     return terms.every(term => searchable.includes(term));
 }
 
+function calculateSaleTotals(subtotalValue, discountValue) {
+    const subtotal = Number(subtotalValue);
+    const discount = discountValue === '' || discountValue == null ? 0 : Number(discountValue);
+    const valid = Number.isFinite(subtotal) && subtotal >= 0 && Number.isFinite(discount) && discount >= 0 && discount <= subtotal;
+    return { subtotal, discount: valid ? discount : 0, total: valid ? subtotal - discount : Math.max(0, Number.isFinite(subtotal) ? subtotal : 0), valid };
+}
+
 async function apiRequest(path, options = {}, token = '') {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), Number(options.timeoutMs) || 15000);
@@ -1328,7 +1335,9 @@ function printSaleReceipt(sale, companyName = 'Bopstina Ventures') {
     const itemsHtml = (sale.items || []).map(item =>
         `<tr><td>${escapeReceiptHtml(item.productName)}</td><td>×${Number(item.quantity) || 0}</td><td>${formatCurrency(item.quantity * item.sellingPrice)}</td></tr>`
     ).join('');
-    win.document.write(`<html><head><title>Receipt</title><style>body{font-family:monospace;padding:20px;max-width:380px;margin:auto}.line{border-top:1px dashed #aaa;margin:10px 0}table{width:100%;font-size:13px}td{padding:4px 2px}.total{display:flex;justify-content:space-between;font-size:18px;font-weight:bold}</style></head><body><h2 style="text-align:center">${escapeReceiptHtml(companyName)}</h2><p>${escapeReceiptHtml(new Date(sale.date || Date.now()).toLocaleString())}</p><p>Customer: ${escapeReceiptHtml(sale.customerName || 'Walk-in Customer')}</p><p>Payment: ${escapeReceiptHtml(sale.paymentMethod || 'Cash')}</p><div class="line"></div><table>${itemsHtml}</table><div class="line"></div><div class="total"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div><p>Cash received: ${formatCurrency(sale.cashReceived || 0)}</p><p>Change: ${formatCurrency(sale.change || 0)}</p><p style="text-align:center">Thank you for your business!</p></body></html>`);
+    const subtotal = Number(sale.subtotal ?? (Number(sale.total || 0) + Number(sale.discount || 0)));
+    const discountLine = Number(sale.discount) > 0 ? `<p>Discount: −${formatCurrency(sale.discount)}</p>` : '';
+    win.document.write(`<html><head><title>Receipt</title><style>body{font-family:monospace;padding:20px;max-width:380px;margin:auto}.line{border-top:1px dashed #aaa;margin:10px 0}table{width:100%;font-size:13px}td{padding:4px 2px}.total{display:flex;justify-content:space-between;font-size:18px;font-weight:bold}</style></head><body><h2 style="text-align:center">${escapeReceiptHtml(companyName)}</h2><p>${escapeReceiptHtml(new Date(sale.date || Date.now()).toLocaleString())}</p><p>Customer: ${escapeReceiptHtml(sale.customerName || 'Walk-in Customer')}</p><p>Payment: ${escapeReceiptHtml(sale.paymentMethod || 'Cash')}</p><div class="line"></div><table>${itemsHtml}</table><div class="line"></div><p>Subtotal: ${formatCurrency(subtotal)}</p>${discountLine}<div class="total"><span>TOTAL</span><span>${formatCurrency(sale.total)}</span></div><p>Cash received: ${formatCurrency(sale.cashReceived || 0)}</p><p>Change: ${formatCurrency(sale.change || 0)}</p><p style="text-align:center">Thank you for your business!</p></body></html>`);
     win.document.close();
     win.print();
     return true;
@@ -1340,6 +1349,8 @@ async function shareSaleReceipt(sale, showToast) {
         new Date(sale.date || Date.now()).toLocaleString(),
         `Customer: ${sale.customerName || 'Walk-in Customer'}`,
         ...(sale.items || []).map(item => `${item.productName} x${item.quantity} ${formatCurrency(item.quantity * item.sellingPrice)}`),
+        `Subtotal: ${formatCurrency(sale.subtotal ?? (Number(sale.total || 0) + Number(sale.discount || 0)))}`,
+        ...(Number(sale.discount) > 0 ? [`Discount: -${formatCurrency(sale.discount)}`] : []),
         `Total: ${formatCurrency(sale.total)}`,
         `Payment: ${sale.paymentMethod || 'Cash'}`,
         `Change: ${formatCurrency(sale.change || 0)}`
@@ -1363,19 +1374,27 @@ function CartSidebar({ isOpen, onClose }) {
     const [customerPhone, setCustomerPhone] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('Cash');
     const [cashReceived, setCashReceived] = useState('');
+    const [discountInput, setDiscountInput] = useState('');
     const [processingSale, setProcessingSale] = useState(false);
     const [saleComplete, setSaleComplete] = useState(false);
     const [completedSale, setCompletedSale] = useState(null);
     const [removedCartItem, setRemovedCartItem] = useState(null);
 
     const totalItems = cart.reduce((sum, c) => sum + c.quantity, 0);
-    const totalAmount = cart.reduce((sum, c) => sum + c.quantity * c.product.sellingPrice, 0);
+    const subtotalAmount = cart.reduce((sum, c) => sum + c.quantity * c.product.sellingPrice, 0);
+    const saleTotals = calculateSaleTotals(subtotalAmount, discountInput);
+    const discountAmount = saleTotals.discount;
+    const totalAmount = saleTotals.total;
     const totalProfit = cart.reduce((sum, c) => sum + c.quantity * (c.product.sellingPrice - c.product.buyingPrice),
     0);
 
     const handleCheckout = async () => {
         if (processingSale) return;
         if (cart.length === 0) { showToast('Cart is empty', 'error'); return; }
+        if (!saleTotals.valid) {
+            showToast(`Discount must be between ${formatCurrency(0)} and ${formatCurrency(subtotalAmount)}`, 'error');
+            return;
+        }
         // Check stock
         for (const item of cart) {
             const prod = products.find(p => p.id === item.productId);
@@ -1393,6 +1412,8 @@ function CartSidebar({ isOpen, onClose }) {
             customerName: customerName || 'Walk-in Customer',
             customerPhone,
             paymentMethod,
+            subtotal: subtotalAmount,
+            discount: discountAmount,
             items: cart.map(c => ({
                 productId: c.productId,
                 productName: c.product.name,
@@ -1401,7 +1422,7 @@ function CartSidebar({ isOpen, onClose }) {
                 buyingPrice: c.product.buyingPrice
             })),
             total: totalAmount,
-            profit: totalProfit,
+            profit: totalProfit - discountAmount,
             cashReceived: paymentMethod === 'Cash' ? received : 0,
             change: paymentMethod === 'Cash' ? received - totalAmount : 0
         };
@@ -1424,6 +1445,7 @@ function CartSidebar({ isOpen, onClose }) {
         setCustomerPhone('');
         setPaymentMethod('Cash');
         setCashReceived('');
+        setDiscountInput('');
         setCompletedSale(null);
         setRemovedCartItem(null);
         onClose();
@@ -1590,6 +1612,23 @@ function CartSidebar({ isOpen, onClose }) {
                 )
             ),
             React.createElement('div', null,
+                React.createElement('label', { htmlFor: 'sale-discount', className: 'block text-xs font-medium text-gray-500 mb-1' },
+                    'Discount (GHS)'),
+                React.createElement('input', {
+                    id: 'sale-discount',
+                    type: 'number',
+                    min: '0',
+                    max: subtotalAmount,
+                    step: '0.01',
+                    value: discountInput,
+                    onChange: e => setDiscountInput(e.target.value),
+                    className: 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm',
+                    placeholder: '0.00',
+                    'aria-describedby': 'sale-discount-help'
+                }),
+                React.createElement('p', { id: 'sale-discount-help', className: 'text-xs text-gray-500 mt-1' }, 'Enter an amount to deduct. It cannot exceed the subtotal.')
+            ),
+            React.createElement('div', null,
                 React.createElement('label', { htmlFor: 'cash-received', className: 'block text-xs font-medium text-gray-500 mb-1' },
                     'Cash Received (GHS)'),
                 React.createElement('input', {
@@ -1613,6 +1652,14 @@ function CartSidebar({ isOpen, onClose }) {
                 React.createElement('div', { className: 'flex justify-between' },
                     React.createElement('span', { className: 'text-gray-500' }, 'Items'),
                     React.createElement('span', null, totalItems)
+                ),
+                React.createElement('div', { className: 'flex justify-between' },
+                    React.createElement('span', { className: 'text-gray-500' }, 'Subtotal'),
+                    React.createElement('span', null, formatCurrency(subtotalAmount))
+                ),
+                React.createElement('div', { className: 'flex justify-between' },
+                    React.createElement('span', { className: 'text-gray-500' }, 'Discount'),
+                    React.createElement('span', { className: discountAmount > 0 ? 'text-emerald-700 font-semibold' : 'text-gray-500' }, `−${formatCurrency(discountAmount)}`)
                 ),
                 React.createElement('div', { className: 'flex justify-between font-bold text-lg' },
                     React.createElement('span', null, 'Total'),
@@ -2621,7 +2668,8 @@ React.createElement('p', { className: 'text-xs text-gray-400' },
 new Date(sale.date).toLocaleString(), ' • ',
 sale.items.length, ' items • ',
 sale.paymentMethod || 'Cash'
-)
+),
+sale.discount > 0 && React.createElement('p', { className: 'text-xs font-semibold text-emerald-700 mt-1' }, 'Discount: −', formatCurrency(sale.discount))
 ),
 React.createElement('div', { className: 'flex items-center gap-3' },
 React.createElement('span', { className: `font-bold ${sale.status === 'refunded' ? 'text-gray-400 line-through' : 'text-amber-600'}` }, formatCurrency(sale.total)),

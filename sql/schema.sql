@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS sales (
 	customer_phone TEXT,
 	payment_method TEXT NOT NULL DEFAULT 'Cash',
 	items JSONB NOT NULL DEFAULT '[]'::jsonb,
+	subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
+	discount NUMERIC(12, 2) NOT NULL DEFAULT 0,
 	total NUMERIC(12, 2) NOT NULL DEFAULT 0,
 	profit NUMERIC(12, 2) NOT NULL DEFAULT 0,
 	cash_received NUMERIC(12, 2) NOT NULL DEFAULT 0,
@@ -111,6 +113,13 @@ CREATE TABLE IF NOT EXISTS sales (
 
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMPTZ;
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS client_reference TEXT;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS subtotal NUMERIC(12, 2);
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount NUMERIC(12, 2) DEFAULT 0;
+UPDATE sales SET discount = COALESCE(discount, 0), subtotal = COALESCE(subtotal, total + COALESCE(discount, 0));
+ALTER TABLE sales ALTER COLUMN subtotal SET DEFAULT 0;
+ALTER TABLE sales ALTER COLUMN subtotal SET NOT NULL;
+ALTER TABLE sales ALTER COLUMN discount SET DEFAULT 0;
+ALTER TABLE sales ALTER COLUMN discount SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS sales_tenant_client_reference_unique
 	ON sales (tenant_id, client_reference) WHERE client_reference IS NOT NULL;
 

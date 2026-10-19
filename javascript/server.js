@@ -206,7 +206,7 @@ app.get('/api/bootstrap', requireAuth, async (req, res, next) => {
         const tenantId = req.user.tenant_id;
         const [products, sales, customers, suppliers, expenses, users, register, movements, purchases, auditLogs, groups, quickSellItems] = await Promise.all([
             pool.query(`${productSelect} WHERE tenant_id = $1 AND is_active = true ORDER BY created_at DESC`, [tenantId]),
-            pool.query(`SELECT id, customer_name AS "customerName", customer_phone AS "customerPhone", payment_method AS "paymentMethod", items, total, profit, cash_received AS "cashReceived", change_amount AS "change", status, refunded_at AS "refundedAt", created_at AS date FROM sales WHERE tenant_id = $1 ORDER BY created_at`, [tenantId]),
+            pool.query(`SELECT id, customer_name AS "customerName", customer_phone AS "customerPhone", payment_method AS "paymentMethod", items, total, discount, profit, cash_received AS "cashReceived", change_amount AS "change", status, refunded_at AS "refundedAt", created_at AS date FROM sales WHERE tenant_id = $1 ORDER BY created_at`, [tenantId]),
             pool.query(`SELECT id, name, phone, last_purchase AS "lastPurchase", total_spent AS "totalSpent", purchase_count AS "purchaseCount" FROM customers WHERE tenant_id = $1`, [tenantId]),
             pool.query(`SELECT id, name, contact, phone FROM suppliers WHERE tenant_id = $1`, [tenantId]),
             pool.query(`SELECT id, description, amount, category, expense_date AS date FROM expenses WHERE tenant_id = $1 ORDER BY expense_date DESC`, [tenantId]),
@@ -295,8 +295,14 @@ app.post('/api/sales', requireAuth, async (req, res, next) => {
     if (!Array.isArray(sale.items) || !sale.items.length || sale.items.some(item => !item.productId || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0)) {
         return res.status(400).json({ error: 'Valid sale items are required' });
     }
+    const subtotal = Number(sale.subtotal ?? (Number(sale.total || 0) + Number(sale.discount || 0)));
+    const discount = Number(sale.discount || 0);
+    if (!Number.isFinite(subtotal) || subtotal < 0 || !Number.isFinite(discount) || discount < 0 || discount > subtotal) {
+        return res.status(400).json({ error: 'Discount must be between zero and the sale subtotal' });
+    }
+    const total = subtotal - discount;
     if (sale.clientReference) {
-        const existing = await pool.query('SELECT id, created_at AS date, customer_name AS "customerName", customer_phone AS "customerPhone", payment_method AS "paymentMethod", items, total, profit, cash_received AS "cashReceived", change_amount AS "change", status FROM sales WHERE tenant_id=$1 AND client_reference=$2 LIMIT 1', [req.user.tenant_id, sale.clientReference]);
+        const existing = await pool.query('SELECT id, created_at AS date, customer_name AS "customerName", customer_phone AS "customerPhone", payment_method AS "paymentMethod", items, total, discount, profit, cash_received AS "cashReceived", change_amount AS "change", status FROM sales WHERE tenant_id=$1 AND client_reference=$2 LIMIT 1', [req.user.tenant_id, sale.clientReference]);
         if (existing.rowCount) return res.status(200).json({ sale: existing.rows[0] });
     }
     const client = await pool.connect();
@@ -307,11 +313,11 @@ app.post('/api/sales', requireAuth, async (req, res, next) => {
             if (!stock.rowCount) throw Object.assign(new Error('Insufficient stock'), { status: 409 });
             await client.query('INSERT INTO stock_movements (tenant_id, product_id, quantity, reason) VALUES ($1,$2,$3,$4)', [req.user.tenant_id, item.productId, -Number(item.quantity), 'Sale']);
         }
-        const inserted = await client.query(`INSERT INTO sales (tenant_id, customer_name, customer_phone, payment_method, items, total, profit, cash_received, change_amount, created_by, client_reference)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, created_at AS date`, [req.user.tenant_id, sale.customerName || 'Walk-in Customer', sale.customerPhone || '', sale.paymentMethod || 'Cash', JSON.stringify(sale.items), Number(sale.total) || 0, Number(sale.profit) || 0, Number(sale.cashReceived) || 0, Number(sale.change) || 0, req.user.id, sale.clientReference || null]);
-        if (sale.customerName && sale.customerName !== 'Walk-in Customer') await client.query(`INSERT INTO customers (tenant_id,name,phone,last_purchase,total_spent,purchase_count) VALUES ($1,$2,$3,now(),$4,1) ON CONFLICT (tenant_id,name) DO UPDATE SET phone=EXCLUDED.phone,last_purchase=now(),total_spent=customers.total_spent+EXCLUDED.total_spent,purchase_count=customers.purchase_count+1`, [req.user.tenant_id, sale.customerName, sale.customerPhone || '', Number(sale.total) || 0]);
+        const inserted = await client.query(`INSERT INTO sales (tenant_id, customer_name, customer_phone, payment_method, items, subtotal, discount, total, profit, cash_received, change_amount, created_by, client_reference)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id, created_at AS date`, [req.user.tenant_id, sale.customerName || 'Walk-in Customer', sale.customerPhone || '', sale.paymentMethod || 'Cash', JSON.stringify(sale.items), subtotal, discount, total, Number(sale.profit) || 0, Number(sale.cashReceived) || 0, Number(sale.change) || 0, req.user.id, sale.clientReference || null]);
+        if (sale.customerName && sale.customerName !== 'Walk-in Customer') await client.query(`INSERT INTO customers (tenant_id,name,phone,last_purchase,total_spent,purchase_count) VALUES ($1,$2,$3,now(),$4,1) ON CONFLICT (tenant_id,name) DO UPDATE SET phone=EXCLUDED.phone,last_purchase=now(),total_spent=customers.total_spent+EXCLUDED.total_spent,purchase_count=customers.purchase_count+1`, [req.user.tenant_id, sale.customerName, sale.customerPhone || '', total]);
         await addAudit(client, req.user.tenant_id, req.user.id, 'Sale completed', inserted.rows[0].id);
-        await client.query('COMMIT'); res.status(201).json({ sale: { ...sale, id: inserted.rows[0].id, date: inserted.rows[0].date } });
+        await client.query('COMMIT'); res.status(201).json({ sale: { ...sale, subtotal, discount, total, id: inserted.rows[0].id, date: inserted.rows[0].date } });
     } catch (error) { await client.query('ROLLBACK'); next(error.status ? Object.assign(error, { status: error.status }) : error); } finally { client.release(); }
 });
 
